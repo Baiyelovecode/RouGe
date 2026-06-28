@@ -9,38 +9,69 @@ from game.util import choose_many, clamp, clear_screen, input_choice, status_tex
 
 
 class Combat:
-    def __init__(self, player: Player, enemy: Enemy) -> None:
-        self.ctx = CombatContext(player=player, enemy=enemy, turn=0, log=[])
+    def __init__(self, player: Player, enemy: Enemy | list[Enemy]) -> None:
+        enemies = enemy if isinstance(enemy, list) else [enemy]
+        if not enemies:
+            raise ValueError("combat requires at least one enemy")
+        self.enemies: list[Enemy] = enemies
+        self.target_index = 0
+        self.ctx = CombatContext(player=player, enemy=enemies[0], turn=0, log=[])
         self.hand: list[Skill] = []
         self.turn_records: list[str] = []
         self.clear_records_on_next_card = False
         self.player_burn_applied_this_turn = 0
         self.start_strength = player.strength
         self.start_dexterity = player.dexterity
-        self.is_baiye = enemy.boss_id == "baiye"
+        self.is_baiye = len(enemies) == 1 and enemies[0].boss_id == "baiye"
         self.baiye_shield_turns = 0
         self.baiye_heal_turns = 0
         self.baiye_heal_active = False
         self.baiye_heal_locked = False
         self.baiye_hand: list[Skill] = []
         self.exhausted_cards: Counter[tuple[str, int, int]] = Counter()
+        self.defeated_enemy_ids: set[int] = set()
+
+    def living_enemies(self) -> list[Enemy]:
+        return [enemy for enemy in self.enemies if enemy.alive]
+
+    def has_living_enemies(self) -> bool:
+        return any(enemy.alive for enemy in self.enemies)
+
+    def set_target(self, index: int) -> bool:
+        if index < 0 or index >= len(self.enemies):
+            return False
+        if not self.enemies[index].alive:
+            return False
+        self.target_index = index
+        self.ctx.enemy = self.enemies[index]
+        return True
+
+    def _retarget_if_needed(self) -> None:
+        if self.ctx.enemy.alive:
+            return
+        for idx, enemy in enumerate(self.enemies):
+            if enemy.alive:
+                self.set_target(idx)
+                return
 
     def run(self) -> bool:
         player = self.ctx.player
         enemy = self.ctx.enemy
-        print(f"\n遭遇：{enemy.name}")
+        names = "、".join(enemy.name for enemy in self.enemies)
+        print(f"\n遭遇：{names}")
         self._battle_start()
-        enemy.select_next_move()
+        for foe in self.enemies:
+            foe.select_next_move()
         self._prepare_baiye_hand()
 
-        while player.alive and enemy.alive:
+        while player.alive and self.has_living_enemies():
             self._player_turn()
-            if not enemy.alive or not player.alive:
+            if not self.has_living_enemies() or not player.alive:
                 break
             self._enemy_turn()
 
         if player.alive:
-            print(f"\n你击败了 {enemy.name}。")
+            print(f"\n你击败了 {names}。")
             self._after_battle()
             return True
         print("\n你倒在了塔中。本局结束。")
@@ -52,6 +83,7 @@ class Combat:
         p.statuses.clear()
         p.turn_powers.clear()
         self.exhausted_cards.clear()
+        self.defeated_enemy_ids.clear()
         if p.role_id == "exile":
             bonus = p.starter_bonus
             for relic in p.relics:
@@ -71,16 +103,22 @@ class Combat:
                 p.dexterity += relic.value
                 self._log(f"{relic.name}：敏捷 +{relic.value}。")
             elif relic.hook == "battle_start_poison":
-                self.ctx.enemy.add_status("poison", relic.value)
-                self._log(f"{relic.name}：敌人中毒 {relic.value}。")
+                for enemy in self.enemies:
+                    enemy.add_status("poison", relic.value)
+                self._log(f"{relic.name}：所有敌人中毒 {relic.value}。")
             elif relic.hook == "battle_start_blood_stats":
                 p.strength += relic.value
                 p.dexterity += relic.value
                 self._log(f"{relic.name}：力量 +{relic.value}，敏捷 +{relic.value}。")
             elif relic.hook == "battle_start_burn_block":
                 p.block += relic.value + 2
-                self.ctx.enemy.add_status("burn", relic.value)
-                self._log(f"{relic.name}：获得 {relic.value + 2} 护甲，敌人灼烧 +{relic.value}。")
+                for enemy in self.enemies:
+                    enemy.add_status("burn", relic.value)
+                self._log(f"{relic.name}：获得 {relic.value + 2} 护甲，所有敌人灼烧 +{relic.value}。")
+            elif relic.hook == "battle_start_burn":
+                for enemy in self.enemies:
+                    enemy.add_status("burn", relic.value)
+                self._log(f"{relic.name}：所有敌人灼烧 +{relic.value}。")
             elif relic.hook == "battle_start_trinity":
                 p.strength += relic.value
                 p.dexterity += relic.value
@@ -89,6 +127,16 @@ class Combat:
             elif relic.hook == "battle_start_regeneration":
                 p.add_status("regeneration", relic.value)
                 self._log(f"{relic.name}：获得 {relic.value} 层再生。")
+        for enemy in self.enemies:
+            shell_guard = enemy.mechanics.get("shell_guard", 0)
+            if shell_guard > 0:
+                enemy.block += shell_guard
+                self._log(f"{enemy.name} 甲壳护卫：开战获得 {shell_guard} 护甲。")
+                self._record(f"{enemy.name} 护甲 +{shell_guard}（甲壳护卫）")
+            thorn = enemy.mechanics.get("thorn", 0)
+            if thorn > 0:
+                enemy.thorn_damage = max(enemy.thorn_damage, thorn)
+                self._log(f"{enemy.name} 尖刺外壳：攻击牌会反伤 {enemy.thorn_damage}。")
 
     def _player_turn(self) -> None:
         p = self.ctx.player
@@ -123,7 +171,8 @@ class Combat:
             draw_count += sum(relic.value for relic in p.relics if relic.hook == "first_turn_draw")
         self.hand = choose_many(self._available_deck(), draw_count)
 
-        while p.alive and self.ctx.enemy.alive:
+        while p.alive and self.has_living_enemies():
+            self._retarget_if_needed()
             if not self.hand:
                 self._log("手牌已用完，自动结束回合。")
                 self._record("手牌已用完，自动结束回合")
@@ -156,28 +205,37 @@ class Combat:
         self._decay_statuses(p)
 
     def _enemy_turn(self) -> None:
-        enemy = self.ctx.enemy
         player = self.ctx.player
         self.turn_records.clear()
         if self.is_baiye:
             self._baiye_turn()
             return
-        self._tick_regeneration(enemy)
-        self._tick_poison(enemy)
-        if not enemy.alive:
-            return
-        enemy.block = 0
-        move = enemy.current_move or enemy.select_next_move()
-        self._log(f"{enemy.name} 使用 {move.name}。")
-        self._record(f"{enemy.name} 使用 {move.name}")
-        for effect in move.effects:
-            self._apply_effect(enemy, player, effect)
-            if not player.alive:
-                return
-        self._tick_burn(enemy)
-        self._tick_bleed(enemy)
-        self._decay_statuses(enemy)
-        enemy.select_next_move()
+        for idx, enemy in enumerate(list(self.enemies)):
+            if not enemy.alive:
+                continue
+            self.set_target(idx)
+            self._tick_regeneration(enemy)
+            self._tick_poison(enemy)
+            if not enemy.alive:
+                continue
+            enemy.block = 0
+            rally_block = enemy.mechanics.get("rally_block", 0)
+            if rally_block > 0:
+                for ally in self.living_enemies():
+                    self._gain_block(ally, rally_block, add_dexterity=False)
+                self._log(f"{enemy.name} 号令：全体敌人获得 {rally_block} 护甲。")
+                self._record(f"{enemy.name} 号令：全体敌人护甲 +{rally_block}")
+            move = enemy.current_move or enemy.select_next_move()
+            self._log(f"{enemy.name} 使用 {move.name}。")
+            self._record(f"{enemy.name} 使用 {move.name}")
+            for effect in move.effects:
+                self._apply_effect(enemy, player, effect)
+                if not player.alive:
+                    return
+            self._tick_burn(enemy)
+            self._tick_bleed(enemy)
+            self._decay_statuses(enemy)
+            enemy.select_next_move()
         self.clear_records_on_next_card = True
 
     def _baiye_turn(self) -> None:
@@ -192,10 +250,10 @@ class Combat:
         cards = self.baiye_hand or self._baiye_cards()
         play_count = random.randint(1, 3)
         played = random.sample(cards, play_count)
-        self._log(f"Baiye 获得 3 张随机卡牌，打出 {play_count} 张。")
+        self._log(f"Baiye 获得 3 张专属兵装，打出 {play_count} 张。")
         for card in played:
-            self._log(f"Baiye 使用 {card.name}。")
-            self._record(f"Baiye 使用 [{card.cost}] {card.name}")
+            self._log(f"Baiye 使用 {card.name}：{card.description}")
+            self._record(f"Baiye 使用 {card.name} | {card.description}")
             attacked = False
             for effect in card.effects:
                 if effect.kind == "baiye_shield":
@@ -223,32 +281,58 @@ class Combat:
         if not self.is_baiye:
             return
         self.baiye_hand = self._baiye_cards()
-        names = "、".join(f"{card.name}(Lv.{card.upgrade_level})" for card in self.baiye_hand)
-        self.ctx.enemy.current_move = EnemyMove("随机兵装", f"随机打出 1-3 张：{names}", ())
+        names = "；".join(f"{card.name} Lv.{card.upgrade_level}: {card.description}" for card in self.baiye_hand)
+        self.ctx.enemy.current_move = EnemyMove("白夜兵装", f"下回合随机打出 1-3 张。候选：{names}", ())
 
     def _baiye_cards(self) -> list[Skill]:
-        from game.data import SKILLS, skill, upgrade_skill
+        templates = [
+            ("baiye_slash", "白夜斩", "attack", 44, 0, "damage"),
+            ("baiye_dual", "双月连斩", "attack", 26, 2, "damage"),
+            ("baiye_crush", "压迫力场", "attack", 34, 0, "crush"),
+            ("baiye_plaguefire", "毒火刻印", "skill", 22, 0, "plaguefire"),
+            ("baiye_temper", "白夜淬刃", "power", 5, 0, "temper"),
+            ("baiye_aegis", "白夜壁垒", "power", 200, 0, "aegis"),
+        ]
+        picks = random.sample(templates, 3)
+        return [self._build_baiye_card(*template, level=random.randint(0, 2)) for template in picks]
 
-        pool = [card for card in SKILLS.values() if card.rarity != "basic" and all(
-            effect.kind in {"damage", "weapon_damage", "block", "vulnerable", "weak", "poison", "burn", "strength", "dexterity"}
-            for effect in card.effects
-        )]
-        pool.append(skill("baiye_aegis", "白夜壁垒", 3, "power", "boss", "获得 200 护甲，3 回合后造成剩余护甲伤害。", [Effect("baiye_shield", 200, "self")]))
-        cards = random.sample(pool, 3)
-        result: list[Skill] = []
-        for card in cards:
-            level = random.randint(0, 2)
-            if card.id == "baiye_aegis" and level:
-                value = 200 + level * 50
-                card = Skill(card.id, card.name + "+" * level, max(1, card.cost - level), card.category,
-                             card.rarity, f"获得 {value} 护甲，3 回合后造成剩余护甲伤害。",
-                             (Effect("baiye_shield", value, "self"),), True, level)
-                result.append(card)
-                continue
-            for _ in range(level):
-                card = upgrade_skill(card)
-            result.append(card)
-        return result
+    def _build_baiye_card(self, id_: str, name: str, category: str, value: int, times: int, kind: str, level: int) -> Skill:
+        suffix = "+" * level
+        if kind == "damage":
+            damage = value + level * 12
+            repeat = times or 1
+            desc = f"基础伤害 {damage}" + (f" x{repeat}" if repeat > 1 else "") + "。先加 Baiye 力量，再算玩家护甲。"
+            return Skill(id_, name + suffix, 0, category, "boss", desc, (Effect("damage", damage, times=repeat),), level > 0, level)
+        if kind == "crush":
+            damage = value + level * 10
+            debuff = 2 + level
+            desc = f"基础伤害 {damage}，并施加虚弱 {debuff}、易伤 {debuff}。"
+            return Skill(id_, name + suffix, 0, category, "boss", desc, (
+                Effect("damage", damage),
+                Effect("weak", debuff),
+                Effect("vulnerable", debuff),
+            ), level > 0, level)
+        if kind == "plaguefire":
+            damage = value + level * 8
+            status = 18 + level * 8
+            desc = f"基础伤害 {damage}，并施加灼烧 {status}、中毒 {status}。"
+            return Skill(id_, name + suffix, 0, category, "boss", desc, (
+                Effect("damage", damage),
+                Effect("burn", status),
+                Effect("poison", status),
+            ), level > 0, level)
+        if kind == "temper":
+            stat = value + level * 2
+            block = 80 + level * 40
+            desc = f"Baiye 力量 +{stat}、敏捷 +{stat}，并获得 {block} 护甲。"
+            return Skill(id_, name + suffix, 0, category, "boss", desc, (
+                Effect("strength", stat, "self"),
+                Effect("dexterity", stat, "self"),
+                Effect("block", block, "self"),
+            ), level > 0, level)
+        shield = value + level * 50
+        desc = f"获得 {shield} 护甲。3 回合后对玩家造成 Baiye 剩余护甲等量伤害。"
+        return Skill(id_, name + suffix, 0, category, "boss", desc, (Effect("baiye_shield", shield, "self"),), level > 0, level)
 
     def _advance_baiye_shield(self) -> None:
         if self.baiye_shield_turns <= 0:
@@ -283,8 +367,13 @@ class Combat:
             self.baiye_heal_active = False
             self.baiye_heal_locked = True
 
-    def _use_skill(self, skill: Skill) -> bool:
+    def _use_skill(self, skill: Skill, target_index: int | None = None) -> bool:
         p = self.ctx.player
+        if target_index is not None and self._skill_needs_enemy_target(skill):
+            if not self.set_target(target_index):
+                print("目标无效。")
+                return False
+        self._retarget_if_needed()
         enemy = self.ctx.enemy
         if p.energy < skill.cost:
             print("能量不足。")
@@ -295,12 +384,20 @@ class Combat:
         p.energy -= skill.cost
         self._log(f"你使用 {skill.name}。")
         self._record(f"你使用 {skill.name}")
+        original_target = enemy
         enemy_hp_before = enemy.hp
         block_before = p.block
+        is_group_card = self._is_group_skill(skill)
         for effect in skill.effects:
             self._apply_effect(p, enemy, effect, skill)
             if not enemy.alive:
-                return True
+                self._retarget_if_needed()
+                break
+        if is_group_card:
+            group_block = sum(relic.value for relic in p.relics if relic.hook == "group_card_block")
+            if group_block > 0:
+                self._gain_block(p, group_block, add_dexterity=False)
+                self._record(f"群体牌触发遗物：护甲 +{group_block}")
         burn_on_card = p.turn_powers.get("burn_on_card", 0)
         if burn_on_card and enemy.alive:
             amount = skill.cost * burn_on_card + p.turn_powers.get("burn_on_card_flat", 2)
@@ -308,8 +405,27 @@ class Combat:
             self.player_burn_applied_this_turn += amount
             self._log(f"余烬引擎：{enemy.name} 灼烧 +{amount}。")
             self._record(f"余烬引擎：{enemy.name} 灼烧 +{amount}")
-        self._apply_toxicist_passive(skill, enemy_hp_before - enemy.hp, max(0, p.block - block_before))
+        self._apply_toxicist_passive(skill, enemy_hp_before - original_target.hp, max(0, p.block - block_before), original_target)
         return True
+
+    @staticmethod
+    def _skill_needs_enemy_target(skill: Skill) -> bool:
+        enemy_effects = {
+            "damage", "weapon_damage", "lifesteal_damage", "poison_burst", "vulnerable", "weak",
+            "poison", "burn", "bleed", "fragile", "burn_echo", "draw_if_weak", "damage_per_debuff",
+            "consume_debuffs", "damage_from_burn", "strength_if_burning", "strength_finisher",
+            "exhaust_hand_damage", "exhaust_hand_poison", "exhaust_hand_burn", "poison_if_poisoned",
+            "damage_from_block",
+        }
+        return any(effect.target != "self" and effect.kind in enemy_effects for effect in skill.effects)
+
+    @staticmethod
+    def _is_group_skill(skill: Skill) -> bool:
+        group_effects = {
+            "damage_all", "damage_all_per_enemy", "poison_all", "burn_all", "weak_all",
+            "vulnerable_all", "poison_burst_all", "damage_from_burn_all",
+        }
+        return any(effect.kind in group_effects for effect in skill.effects)
 
     def _should_auto_end_turn(self) -> bool:
         p = self.ctx.player
@@ -326,9 +442,24 @@ class Combat:
                 f"铁壁吐息公式：{effect.value} + 力量 {strength} x{effect.times} = {amount} 护甲。"
             )
             return
+        if effect.kind == "damage_all_per_enemy":
+            base = effect.value + len(self.living_enemies()) * effect.times + self._group_damage_bonus(source)
+            self._log(f"群体伤害公式：{effect.value} + 存活敌人 {len(self.living_enemies())} x {effect.times} = {base}。")
+            for enemy in list(self.living_enemies()):
+                self._deal_damage(source, enemy, base, skill)
+            return
+        if effect.kind == "block_per_enemy":
+            amount = effect.value + len(self.living_enemies()) * effect.times
+            self._log(f"群体护甲公式：{effect.value} + 存活敌人 {len(self.living_enemies())} x {effect.times} = {amount}。")
+            self._gain_block(actual_target, amount)
+            return
         for _ in range(effect.times):
             if effect.kind == "damage":
                 self._deal_damage(source, actual_target, effect.value, skill)
+            elif effect.kind == "damage_all":
+                base = effect.value + self._group_damage_bonus(source)
+                for enemy in list(self.living_enemies()):
+                    self._deal_damage(source, enemy, base, skill)
             elif effect.kind == "weapon_damage":
                 self._deal_weapon_damage(source, actual_target, effect.value, skill)
             elif effect.kind == "lifesteal_damage":
@@ -342,28 +473,7 @@ class Combat:
                     self._log(f"{source.name} 吸血回复 {heal} 生命。")
                     self._record(f"{source.name} 回复 {heal} 生命（吸血）")
             elif effect.kind == "poison_burst":
-                poison = actual_target.statuses.get("poison", 0)
-                multiplier = 150 + effect.value
-                if isinstance(source, Player):
-                    for relic in source.relics:
-                        if relic.hook == "poison_burst_bonus":
-                            multiplier += relic.value
-                burst_damage = math.ceil(poison * multiplier / 100)
-                if burst_damage <= 0:
-                    self._log(f"{actual_target.name} 没有中毒，毒爆没有造成伤害。")
-                    self._record("毒爆未造成伤害")
-                else:
-                    dealt = self._deal_fixed_damage(source, actual_target, burst_damage, "毒爆")
-                    remaining_poison = math.ceil(poison * 0.6)
-                    if remaining_poison > 0:
-                        actual_target.statuses["poison"] = remaining_poison
-                    else:
-                        actual_target.statuses.pop("poison", None)
-                    self._log(f"毒爆：{poison} 层中毒 x {multiplier}% = {burst_damage} 基础伤害，实际造成 {dealt}。")
-                    self._log(f"{actual_target.name} 的中毒层数变为 {remaining_poison}。")
-                    self._record(f"毒爆公式：{poison} x {multiplier}% = {burst_damage}")
-                    self._record(f"毒爆实际扣血 {dealt}")
-                    self._record(f"{actual_target.name} 中毒变为 {remaining_poison}")
+                self._apply_poison_burst(source, actual_target, effect.value)
             elif effect.kind == "block":
                 self._gain_block(actual_target, effect.value)
             elif effect.kind == "damage_from_block":
@@ -390,6 +500,26 @@ class Combat:
                 self._record(f"{actual_target.name} 获得 {self._status_name(effect.kind)} {effect.value}")
                 if effect.kind == "burn" and isinstance(source, Player) and isinstance(actual_target, Enemy):
                     self.player_burn_applied_this_turn += effect.value
+            elif effect.kind in {"poison_all", "burn_all", "weak_all", "vulnerable_all"}:
+                status = {
+                    "poison_all": "poison",
+                    "burn_all": "burn",
+                    "weak_all": "weak",
+                    "vulnerable_all": "vulnerable",
+                }[effect.kind]
+                for enemy in self.living_enemies():
+                    enemy.add_status(status, effect.value)
+                    self._log(f"{enemy.name} 获得 {self._status_name(status)} {effect.value}。")
+                    self._record(f"{enemy.name} 获得 {self._status_name(status)} {effect.value}")
+                    if status == "burn" and isinstance(source, Player):
+                        self.player_burn_applied_this_turn += effect.value
+            elif effect.kind == "poison_burst_all":
+                for enemy in list(self.living_enemies()):
+                    self._apply_poison_burst(source, enemy, effect.value)
+            elif effect.kind == "damage_from_burn_all":
+                for enemy in list(self.living_enemies()):
+                    amount = math.ceil(enemy.statuses.get("burn", 0) * effect.value / 100)
+                    self._deal_fixed_damage(source, enemy, amount, "全体熔火追击")
             elif effect.kind == "energy" and isinstance(actual_target, Player):
                 actual_target.energy += effect.value
                 self._log(f"{actual_target.name} 获得 {effect.value} 点能量。")
@@ -482,26 +612,44 @@ class Combat:
 
     def _deal_damage(self, source: Fighter, target: Fighter, base: int, skill: Skill | None) -> int:
         damage = base + source.strength
+        formula_parts = [f"基础 {base}", f"力量 {source.strength}"]
+        if isinstance(source, Enemy):
+            pack_bonus = source.mechanics.get("pack_hunter", 0)
+            if pack_bonus > 0 and len(self.living_enemies()) > 1:
+                damage += pack_bonus
+                formula_parts.append(f"群猎 {pack_bonus}")
+                self._log(f"{source.name} 群猎：伤害 +{pack_bonus}。")
         if isinstance(source, Player):
             for relic in source.relics:
                 if relic.hook == "attack_bonus":
                     damage += relic.value
+                    formula_parts.append(f"{relic.name} {relic.value}")
             bonus = source.turn_powers.pop("next_attack", 0)
             if bonus:
                 damage += bonus
+                formula_parts.append(f"蓄势 {bonus}")
                 self._log(f"蓄势触发：伤害 +{bonus}。")
             self.ctx.attacks_this_turn += 1
         if source.statuses.get("weak", 0):
             damage = math.floor(damage * 0.75)
+            formula_parts.append("虚弱 x0.75")
         if target.statuses.get("vulnerable", 0):
             damage = math.floor(damage * 1.5)
+            formula_parts.append("易伤 x1.5")
         damage = max(0, damage)
+        was_alive = isinstance(target, Enemy) and target.alive
         absorbed = min(target.block, damage)
         target.block -= absorbed
         hp_damage = damage - absorbed
         target.hp = clamp(target.hp - hp_damage, 0, target.max_hp)
         self._on_enemy_hp_loss(target, hp_damage)
+        if was_alive and isinstance(target, Enemy) and not target.alive:
+            self._handle_enemy_defeat(target, source, skill)
         self._log(f"{source.name} 对 {target.name} 造成 {hp_damage} 伤害。")
+        self._record(
+            f"{source.name} -> {target.name}：{' + '.join(formula_parts)} => {damage}；"
+            f"护甲抵消 {absorbed}；生命 -{hp_damage}"
+        )
         if hp_damage > 0:
             self._record(f"{source.name} -> {target.name}: {hp_damage} 伤害")
         elif absorbed > 0:
@@ -512,17 +660,51 @@ class Combat:
 
     def _deal_weapon_damage(self, source: Fighter, target: Fighter, base: int, skill: Skill | None) -> int:
         bonus = max(0, source.dexterity)
+        bonus_parts = [f"敏捷 {max(0, source.dexterity)}"]
         if isinstance(source, Player):
             for relic in source.relics:
                 if relic.hook == "weapon_bonus":
                     bonus += relic.value
+                    bonus_parts.append(f"{relic.name} {relic.value}")
                 elif relic.hook == "status_weapon_bonus" and (target.statuses.get("poison", 0) or target.statuses.get("burn", 0)):
                     bonus += relic.value
+                    bonus_parts.append(f"{relic.name} {relic.value}")
+        self._record(f"武器修正：基础 {base} + {' + '.join(bonus_parts)} = {base + bonus}")
         return self._deal_damage(source, target, base + bonus, skill)
 
-    def _apply_toxicist_passive(self, skill: Skill, damage_dealt: int, block_gained: int) -> None:
+    def _group_damage_bonus(self, source: Fighter) -> int:
+        if not isinstance(source, Player):
+            return 0
+        bonus = sum(relic.value for relic in source.relics if relic.hook == "group_damage_bonus")
+        if bonus > 0:
+            self._log(f"群体伤害遗物：全体伤害基础值 +{bonus}。")
+        return bonus
+
+    def _apply_poison_burst(self, source: Fighter, target: Fighter, bonus_multiplier: int) -> None:
+        poison = target.statuses.get("poison", 0)
+        multiplier = 150 + bonus_multiplier
+        if isinstance(source, Player):
+            for relic in source.relics:
+                if relic.hook == "poison_burst_bonus":
+                    multiplier += relic.value
+        burst_damage = math.ceil(poison * multiplier / 100)
+        if burst_damage <= 0:
+            self._log(f"{target.name} 没有中毒，毒爆没有造成伤害。")
+            self._record(f"{target.name} 毒爆未造成伤害")
+            return
+        dealt = self._deal_fixed_damage(source, target, burst_damage, "毒爆")
+        remaining_poison = math.ceil(poison * 0.6)
+        if remaining_poison > 0:
+            target.statuses["poison"] = remaining_poison
+        else:
+            target.statuses.pop("poison", None)
+        self._log(f"毒爆：{poison} 层中毒 x {multiplier}% = {burst_damage} 基础伤害，实际造成 {dealt}。")
+        self._log(f"{target.name} 的中毒层数变为 {remaining_poison}。")
+        self._record(f"{target.name} 毒爆：{poison} x {multiplier}% = {burst_damage}；实际 -{dealt}；中毒剩余 {remaining_poison}")
+
+    def _apply_toxicist_passive(self, skill: Skill, damage_dealt: int, block_gained: int, target: Enemy | None = None) -> None:
         p = self.ctx.player
-        enemy = self.ctx.enemy
+        enemy = target or self.ctx.enemy
         if p.role_id != "toxicist" or not enemy.alive:
             return
         poison = max(damage_dealt // 3, block_gained // 2, skill.cost * 2, 2)
@@ -565,18 +747,28 @@ class Combat:
 
     def _deal_fixed_damage(self, source: Fighter, target: Fighter, amount: int, reason: str) -> int:
         damage = max(0, amount)
+        formula_parts = [f"基础 {amount}"]
         if source.statuses.get("weak", 0):
             damage = math.floor(damage * 0.75)
+            formula_parts.append("虚弱 x0.75")
         if target.statuses.get("vulnerable", 0):
             damage = math.floor(damage * 1.5)
+            formula_parts.append("易伤 x1.5")
+        was_alive = isinstance(target, Enemy) and target.alive
         absorbed = min(target.block, damage)
         target.block -= absorbed
         hp_damage = damage - absorbed
         target.hp = clamp(target.hp - hp_damage, 0, target.max_hp)
         self._on_enemy_hp_loss(target, hp_damage)
+        if was_alive and isinstance(target, Enemy) and not target.alive:
+            self._handle_enemy_defeat(target, source, None)
         if absorbed > 0:
             self._record(f"{target.name} 护甲抵消 {absorbed} 点{reason}")
         self._log(f"{reason} 对 {target.name} 造成 {hp_damage} 伤害。")
+        self._record(
+            f"{reason} -> {target.name}：{' + '.join(formula_parts)} => {damage}；"
+            f"护甲抵消 {absorbed}；生命 -{hp_damage}"
+        )
         return hp_damage
 
     def _gain_block(self, target: Fighter, base: int, add_dexterity: bool = True) -> None:
@@ -643,11 +835,14 @@ class Combat:
 
     def _deal_status_damage(self, fighter: Fighter, amount: int, reason: str) -> int:
         damage = max(0, amount)
+        was_alive = isinstance(fighter, Enemy) and fighter.alive
         absorbed = min(fighter.block, damage)
         fighter.block -= absorbed
         hp_damage = min(damage - absorbed, fighter.hp)
         fighter.hp = clamp(fighter.hp - hp_damage, 0, fighter.max_hp)
         self._on_enemy_hp_loss(fighter, hp_damage)
+        if was_alive and isinstance(fighter, Enemy) and not fighter.alive:
+            self._handle_enemy_defeat(fighter)
         if absorbed:
             self._log(f"{reason}：{fighter.name} 的护甲抵消 {absorbed} 点伤害。")
             self._record(f"{fighter.name} 护甲抵消 {absorbed} 点{reason}")
@@ -713,11 +908,34 @@ class Combat:
         return len(cards)
 
     def _deal_direct_hp_loss(self, fighter: Fighter, amount: int, reason: str) -> None:
+        was_alive = isinstance(fighter, Enemy) and fighter.alive
         actual = min(max(0, amount), fighter.hp)
         fighter.hp = clamp(fighter.hp - actual, 0, fighter.max_hp)
         self._on_enemy_hp_loss(fighter, actual)
+        if was_alive and isinstance(fighter, Enemy) and not fighter.alive:
+            self._handle_enemy_defeat(fighter)
         self._log(f"{reason}：{fighter.name} 失去 {actual} 生命。")
         self._record(f"{fighter.name} 受到 {actual} 伤害（{reason}）")
+
+    def _handle_enemy_defeat(self, enemy: Enemy, source: Fighter | None = None, skill: Skill | None = None) -> None:
+        marker = id(enemy)
+        if marker in self.defeated_enemy_ids or enemy.alive:
+            return
+        self.defeated_enemy_ids.add(marker)
+        death_poison = enemy.mechanics.get("death_poison", 0)
+        if death_poison > 0:
+            self.ctx.player.add_status("poison", death_poison)
+            self._log(f"{enemy.name} 毒囊爆裂：{self.ctx.player.name} 中毒 +{death_poison}。")
+            self._record(f"{self.ctx.player.name} 中毒 +{death_poison}（毒囊爆裂）")
+        if isinstance(source, Player) and skill is not None and skill.category in {"attack", "weapon"}:
+            splash = sum(relic.value for relic in source.relics if relic.hook == "overkill_splash")
+            if splash > 0:
+                others = [foe for foe in self.living_enemies() if foe is not enemy]
+                if others:
+                    self._log(f"裂刃碎片：击杀溅射，对其余敌人造成 {splash} 点伤害。")
+                    for foe in others:
+                        self._deal_fixed_damage(source, foe, splash, "击杀溅射")
+        self._retarget_if_needed()
 
     def _on_enemy_hp_loss(self, fighter: Fighter, amount: int) -> None:
         if amount <= 0 or not isinstance(fighter, Enemy) or fighter.boss_id != "baiye":
@@ -776,6 +994,15 @@ class Combat:
                 if effect.times > 1:
                     label += f" x{effect.times}"
                 parts.append(label)
+            elif effect.kind == "damage_all":
+                damage = self._preview_damage(effect.value)
+                label = f"全体伤害 {damage}"
+                if effect.times > 1:
+                    label += f" x{effect.times}"
+                parts.append(label)
+            elif effect.kind == "damage_all_per_enemy":
+                base = effect.value + len(self.living_enemies()) * effect.times
+                parts.append(f"全体伤害 {self._preview_damage(base)}（敌人数 {len(self.living_enemies())}）")
             elif effect.kind == "weapon_damage":
                 damage = self._preview_damage(effect.value + max(0, self.ctx.player.dexterity), weapon=True)
                 label = f"武器伤害 {damage}"
@@ -791,6 +1018,9 @@ class Combat:
                 parts.append(f"伤害 {damage} / 吸血约 {heal}")
             elif effect.kind == "block":
                 parts.append(f"护甲 {max(0, effect.value + self.ctx.player.dexterity)}")
+            elif effect.kind == "block_per_enemy":
+                amount = effect.value + len(self.living_enemies()) * effect.times
+                parts.append(f"护甲 {max(0, amount + self.ctx.player.dexterity)}（敌人数 {len(self.living_enemies())}）")
             elif effect.kind == "damage_from_block":
                 parts.append(f"护甲联动伤害 {math.ceil(self.ctx.player.block * effect.value / 100)}")
             elif effect.kind == "block_from_strength":
@@ -811,6 +1041,19 @@ class Combat:
                 parts.append(f"毒爆 基础{base_damage}/预计扣血{expected}")
             elif effect.kind == "draw":
                 parts.append(f"抽牌 {effect.value}")
+            elif effect.kind == "poison_all":
+                parts.append(f"全体中毒 {effect.value}")
+            elif effect.kind == "burn_all":
+                parts.append(f"全体灼烧 {effect.value}")
+            elif effect.kind == "weak_all":
+                parts.append(f"全体虚弱 {effect.value}")
+            elif effect.kind == "vulnerable_all":
+                parts.append(f"全体易伤 {effect.value}")
+            elif effect.kind == "poison_burst_all":
+                parts.append("全体毒爆")
+            elif effect.kind == "damage_from_burn_all":
+                total = sum(math.ceil(enemy.statuses.get("burn", 0) * effect.value / 100) for enemy in self.living_enemies())
+                parts.append(f"全体灼烧追击合计 {total}")
             elif effect.kind == "energy":
                 parts.append(f"能量 +{effect.value}")
             elif effect.kind == "exhaust_hand_damage":

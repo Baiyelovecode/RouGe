@@ -8,9 +8,10 @@ from typing import Any
 from game.combat import Combat
 from game.data import (
     SKILLS,
-    boss_enemy,
+    act_floor_count,
+    act_start_floor,
     create_player,
-    elite_enemy,
+    enemy_group,
     normal_enemy,
     random_relic,
     random_relics,
@@ -155,12 +156,13 @@ class RogueGameAdapter:
             return self._error("invalid_phase", "当前已经在战斗中")
         self.act = act or self.act
         self.settlement = None
-        enemy = self._create_enemy(enemy_type)
-        self.combat = Combat(self.player, enemy)
+        enemies = self._create_enemies(enemy_type)
+        self.combat = Combat(self.player, enemies)
         self.phase = "combat"
         with self._suppress_stdout():
             self.combat._battle_start()
-        enemy.select_next_move()
+        for enemy in self.combat.enemies:
+            enemy.select_next_move()
         self.combat._prepare_baiye_hand()
         self._start_player_turn()
         return self._ok("start_combat", {"enemy_type": enemy_type, "state": self.get_state()})
@@ -187,10 +189,25 @@ class RogueGameAdapter:
                 "turn": self.combat.ctx.turn,
                 "enemy": {
                     **_fighter_to_dict(enemy),
+                    "index": self.combat.target_index,
+                    "active": True,
                     "intent": enemy.current_move.intent if enemy.current_move else "unknown",
                     "current_move": _enemy_move_to_dict(enemy.current_move),
                     "thorn_damage": enemy.thorn_damage,
+                    "mechanics": dict(enemy.mechanics),
                 },
+                "enemies": [
+                    {
+                        **_fighter_to_dict(foe),
+                        "index": idx,
+                        "active": idx == self.combat.target_index,
+                        "intent": foe.current_move.intent if foe.current_move else "unknown",
+                        "current_move": _enemy_move_to_dict(foe.current_move),
+                        "thorn_damage": foe.thorn_damage,
+                        "mechanics": dict(foe.mechanics),
+                    }
+                    for idx, foe in enumerate(self.combat.enemies)
+                ],
                 "hand": [
                     _skill_to_dict(skill, idx, self.combat._skill_preview(skill))
                     for idx, skill in enumerate(self.combat.hand)
@@ -206,6 +223,7 @@ class RogueGameAdapter:
 
         actions: list[dict[str, Any]] = []
         player = self.combat.ctx.player
+        targets = [{"index": idx, "name": enemy.name} for idx, enemy in enumerate(self.combat.enemies) if enemy.alive]
         for idx, skill in enumerate(self.combat.hand):
             actions.append({
                 "action": "play_card",
@@ -213,6 +231,7 @@ class RogueGameAdapter:
                 "legal": player.energy >= skill.cost,
                 "reason": "ok" if player.energy >= skill.cost else "energy_not_enough",
                 "card": _skill_to_dict(skill, idx, self.combat._skill_preview(skill)),
+                "targets": targets if self.combat._skill_needs_enemy_target(skill) else [],
             })
         actions.append({"action": "end_turn", "params": {}, "legal": True, "reason": "ok"})
         return actions
@@ -235,6 +254,8 @@ class RogueGameAdapter:
             return self.shop_leave()
         if action == "choice_select":
             return self.choice_select(params)
+        if action == "select_target":
+            return self.select_target(params)
         if action == "play_card":
             return self.play_card(params)
         if action == "end_turn":
@@ -278,10 +299,20 @@ class RogueGameAdapter:
             return self._error("unknown_node", node)
         return self._ok(node, {"state": self.get_state()})
 
+    def select_target(self, params: dict[str, Any]) -> dict[str, Any]:
+        if self.phase != "combat" or self.combat is None:
+            return self._error("invalid_phase", "当前不在战斗中")
+        index = params.get("target_index")
+        if not isinstance(index, int):
+            return self._error("invalid_target", "target_index 必须是数字")
+        if not self.combat.set_target(index):
+            return self._error("invalid_target", "目标无效或已经倒下")
+        return self._ok("select_target", {"target_index": index, "state": self.get_state()})
+
     def play_card(self, params: dict[str, Any]) -> dict[str, Any]:
         if self.phase != "combat" or self.combat is None:
             return self._error("invalid_phase", "当前不在战斗中")
-        if not self.combat.ctx.player.alive or not self.combat.ctx.enemy.alive:
+        if not self.combat.ctx.player.alive or not self.combat.has_living_enemies():
             return self._finish_if_needed()
 
         hand_index = params.get("hand_index")
@@ -295,10 +326,17 @@ class RogueGameAdapter:
         skill = self.combat.hand[hand_index]
         if self.combat.ctx.player.energy < skill.cost:
             return self._error("energy_not_enough", f"能量不足: {skill.name} 需要 {skill.cost}")
+        target_index = params.get("target_index")
+        if target_index is not None and not isinstance(target_index, int):
+            return self._error("invalid_target", "target_index 必须是数字")
+        if target_index is None:
+            target_index = self.combat.target_index
+        if self.combat._skill_needs_enemy_target(skill) and not self.combat.set_target(target_index):
+            return self._error("invalid_target", "目标无效或已经倒下")
 
         before_log_len = len(self.combat.ctx.log)
         with self._suppress_stdout():
-            used = self.combat._use_skill(skill)
+            used = self.combat._use_skill(skill, target_index)
         if used and skill in self.combat.hand:
             self.combat.hand.remove(skill)
 
@@ -321,15 +359,15 @@ class RogueGameAdapter:
     def end_turn(self) -> dict[str, Any]:
         if self.phase != "combat" or self.combat is None:
             return self._error("invalid_phase", "当前不在战斗中")
-        if not self.combat.ctx.player.alive or not self.combat.ctx.enemy.alive:
+        if not self.combat.ctx.player.alive or not self.combat.has_living_enemies():
             return self._finish_if_needed()
 
         before_log_len = len(self.combat.ctx.log)
         with self._suppress_stdout():
             self._finish_player_turn()
-            if self.combat.ctx.enemy.alive and self.combat.ctx.player.alive:
+            if self.combat.has_living_enemies() and self.combat.ctx.player.alive:
                 self.combat._enemy_turn()
-            if self.combat.ctx.enemy.alive and self.combat.ctx.player.alive:
+            if self.combat.has_living_enemies() and self.combat.ctx.player.alive:
                 self._start_player_turn()
 
         result = self._finish_if_needed()
@@ -475,12 +513,8 @@ class RogueGameAdapter:
         self._advance_floor()
         return self._ok("choice_select", {"selected": option.get("label"), "state": self.get_state()})
 
-    def _create_enemy(self, enemy_type: str) -> Enemy:
-        if enemy_type == "elite":
-            return elite_enemy(self.act)
-        if enemy_type == "boss":
-            return boss_enemy(self.act)
-        return normal_enemy(self.act)
+    def _create_enemies(self, enemy_type: str) -> list[Enemy]:
+        return enemy_group(enemy_type, self.act, self._floor_in_act())
 
     def _start_player_turn(self) -> None:
         assert self.combat is not None
@@ -524,8 +558,7 @@ class RogueGameAdapter:
         if self.phase != "combat" or self.combat is None:
             return False
         player = self.combat.ctx.player
-        enemy = self.combat.ctx.enemy
-        if not player.alive or not enemy.alive:
+        if not player.alive or not self.combat.has_living_enemies():
             return False
         return not any(skill.cost <= player.energy for skill in self.combat.hand)
 
@@ -533,7 +566,8 @@ class RogueGameAdapter:
         assert self.combat is not None
         player = self.combat.ctx.player
         enemy = self.combat.ctx.enemy
-        if enemy.alive and player.alive:
+        enemy_names = "、".join(enemy.name for enemy in self.combat.enemies)
+        if self.combat.has_living_enemies() and player.alive:
             return {"status": "ok"}
         if player.alive:
             with self._suppress_stdout():
@@ -547,7 +581,7 @@ class RogueGameAdapter:
                 "type": "combat",
                 "title": "战斗结算",
                 "result": "won",
-                "enemy": enemy.name,
+                "enemy": enemy_names,
                 "node": self.current_node,
                 "gold": gold,
                 "player_hp": player.hp,
@@ -558,16 +592,16 @@ class RogueGameAdapter:
                 "relic": _relic_to_dict(self.pending_relic) if self.pending_relic else None,
             }
             self.phase = "reward"
-            self.last_result = {"combat_result": "won", "enemy": enemy.name, "gold": gold}
+            self.last_result = {"combat_result": "won", "enemy": enemy_names, "gold": gold}
             self.combat = None
             return self._ok("combat_finished", {"combat_result": "won", "state": self.get_state()})
         self.phase = "game_over"
-        self.last_result = {"combat_result": "lost", "enemy": enemy.name}
+        self.last_result = {"combat_result": "lost", "enemy": enemy_names}
         self.settlement = {
             "type": "combat",
             "title": "战斗结算",
             "result": "lost",
-            "enemy": enemy.name,
+            "enemy": enemy_names,
             "node": self.current_node,
             "player_hp": player.hp,
             "player_max_hp": player.max_hp,
@@ -626,11 +660,12 @@ class RogueGameAdapter:
 
     def _roll_node_choices(self) -> list[str]:
         floor_in_act = self._floor_in_act()
+        final_floor = act_floor_count(self.act)
         if floor_in_act == 1:
             return ["combat"]
-        if floor_in_act == 8:
+        if floor_in_act == final_floor:
             return ["boss"]
-        if floor_in_act == 7:
+        if floor_in_act == final_floor - 1:
             return ["rest", "shop", "training"]
         pool = ["combat", "combat", "combat", "event", "event", "treasure", "shop", "rest", "training", "armory"]
         if floor_in_act >= 3:
@@ -638,7 +673,7 @@ class RogueGameAdapter:
         return random.sample(pool, 4)
 
     def _floor_in_act(self) -> int:
-        return ((self.floor - 1) % 8) + 1
+        return self.floor - act_start_floor(self.act) + 1
 
     def _advance_floor(self) -> None:
         if self.player.role_id == "exile":
@@ -646,14 +681,14 @@ class RogueGameAdapter:
             self.player.dexterity = 0
             old = self.player.starter_bonus
             self.player.starter_bonus = min(80, max(old + 1, (old * 118 + 99) // 100))
-        if self._floor_in_act() == 8:
+        if self._floor_in_act() == act_floor_count(self.act):
             self.act += 1
             if self.act > 4:
                 self.phase = "victory"
                 self.node_choices = []
                 self.last_result = {"game_result": "won"}
                 return
-            self.floor = (self.act - 1) * 8 + 1
+            self.floor = act_start_floor(self.act)
         else:
             self.floor += 1
         self.current_node = None

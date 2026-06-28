@@ -6,7 +6,8 @@ from unittest.mock import patch
 from game.combat import Combat
 from game.ai_adapter import RogueGameAdapter
 from game.catalog import card_catalog_entries, relic_catalog_entries
-from game.data import RELICS, SKILLS, boss_enemy, create_player, normal_enemy, random_relics, upgrade_skill
+from game.data import RELICS, SKILLS, act_floor_count, boss_enemy, create_player, enemy_group, move, normal_enemy, random_relics, upgrade_skill
+from game.models import Effect, Enemy
 from game.runner import Game
 
 
@@ -24,6 +25,117 @@ class ChapterFourTests(unittest.TestCase):
         self.assertEqual((enemy.name, enemy.hp, enemy.max_hp), ("Baiye", 2499, 2499))
         self.assertEqual((enemy.strength, enemy.dexterity), (5, 5))
         self.assertEqual(enemy.boss_id, "baiye")
+
+    def test_chapter_four_has_extra_floors_before_baiye(self) -> None:
+        self.assertEqual(act_floor_count(1), 8)
+        self.assertEqual(act_floor_count(4), 12)
+
+        adapter = RogueGameAdapter("exile")
+        adapter.act = 4
+        adapter.floor = 32
+        self.assertEqual(adapter._floor_in_act(), 8)
+        self.assertNotEqual(adapter._roll_node_choices(), ["boss"])
+
+        adapter.floor = 36
+        self.assertEqual(adapter._floor_in_act(), 12)
+        self.assertEqual(adapter._roll_node_choices(), ["boss"])
+
+
+class MultiEnemyMechanicTests(unittest.TestCase):
+    def test_first_floor_is_single_enemy(self) -> None:
+        with patch("game.data.random.randint", return_value=3):
+            enemies = enemy_group("normal", act=1, floor_in_act=1)
+
+        self.assertEqual(len(enemies), 1)
+
+    def test_second_floor_can_roll_multiple_enemies(self) -> None:
+        with patch("game.data.random.randint", return_value=3):
+            enemies = enemy_group("normal", act=1, floor_in_act=2)
+
+        self.assertEqual(len(enemies), 3)
+
+    def test_aoe_damage_hits_all_living_enemies(self) -> None:
+        player = create_player("exile")
+        enemies = [
+            Enemy("目标甲", 30, 30),
+            Enemy("目标乙", 30, 30),
+        ]
+        combat = Combat(player, enemies)
+
+        combat._use_skill(SKILLS["sweeping_strike"], target_index=0)
+
+        self.assertLess(enemies[0].hp, 30)
+        self.assertLess(enemies[1].hp, 30)
+
+    def test_death_poison_triggers_once(self) -> None:
+        player = create_player("exile")
+        enemy = Enemy("毒囊怪", 5, 5, mechanics={"death_poison": 4})
+        combat = Combat(player, enemy)
+
+        combat._deal_fixed_damage(player, enemy, 99, "测试")
+        combat._deal_fixed_damage(player, enemy, 99, "测试")
+
+        self.assertEqual(player.statuses.get("poison"), 4)
+
+    def test_pack_hunter_adds_damage_when_allies_live(self) -> None:
+        player = create_player("exile")
+        hunter = Enemy(
+            "裂爪兽",
+            30,
+            30,
+            mechanics={"pack_hunter": 3},
+            moves=[move("撕咬", "攻击 5", [Effect("damage", 5)])],
+        )
+        ally = Enemy("同伴", 30, 30)
+        combat = Combat(player, [hunter, ally])
+
+        combat._deal_damage(hunter, player, 5, None)
+
+        self.assertEqual(player.hp, player.max_hp - 8)
+
+    def test_group_damage_relic_only_boosts_aoe_cards(self) -> None:
+        player = create_player("exile")
+        player.relics.append(RELICS[[relic.id for relic in RELICS].index("cleave_charm")])
+        enemies = [Enemy("甲", 30, 30), Enemy("乙", 30, 30)]
+        combat = Combat(player, enemies)
+
+        combat._use_skill(SKILLS["sweeping_strike"], target_index=0)
+
+        self.assertEqual([enemy.hp for enemy in enemies], [23, 23])
+
+    def test_group_card_block_relic_triggers_on_group_card(self) -> None:
+        player = create_player("exile")
+        player.relics.append(RELICS[[relic.id for relic in RELICS].index("echo_banner")])
+        combat = Combat(player, [Enemy("甲", 30, 30), Enemy("乙", 30, 30)])
+
+        combat._use_skill(SKILLS["plague_mist"], target_index=0)
+
+        self.assertEqual(player.block, 5)
+
+    def test_overkill_splash_hits_other_enemies(self) -> None:
+        player = create_player("exile")
+        player.strength = 20
+        player.relics.append(RELICS[[relic.id for relic in RELICS].index("splinter_blade")])
+        enemies = [Enemy("甲", 10, 10), Enemy("乙", 20, 20)]
+        combat = Combat(player, enemies)
+
+        combat._use_skill(SKILLS["strike"], target_index=0)
+
+        self.assertFalse(enemies[0].alive)
+        self.assertEqual(enemies[1].hp, 12)
+
+    def test_group_poison_burst_consumes_each_enemy_poison(self) -> None:
+        player = create_player("exile")
+        enemies = [Enemy("甲", 50, 50), Enemy("乙", 50, 50)]
+        for enemy in enemies:
+            enemy.add_status("poison", 10)
+        combat = Combat(player, enemies)
+
+        combat._use_skill(SKILLS["toxic_bloom"], target_index=0)
+
+        self.assertLess(enemies[0].hp, 50)
+        self.assertLess(enemies[1].hp, 50)
+        self.assertEqual(enemies[0].statuses.get("poison"), enemies[1].statuses.get("poison"))
 
 
 class UpgradeTests(unittest.TestCase):
@@ -86,6 +198,24 @@ class WebPreviewTests(unittest.TestCase):
 
         self.assertIn("造成 6 点伤害", card["description"])
         self.assertEqual(card["preview"], "伤害 16")
+
+    def test_web_combat_can_target_one_enemy_in_group(self) -> None:
+        adapter = RogueGameAdapter("exile", seed=2)
+        adapter.floor = 2
+        with patch("game.data.random.randint", return_value=3):
+            adapter.start_combat("normal")
+        assert adapter.combat is not None
+        self.assertEqual(len(adapter.get_state()["combat"]["enemies"]), 3)
+
+        adapter.combat.hand = [SKILLS["strike"]]
+        first_hp = adapter.combat.enemies[0].hp
+        second_hp = adapter.combat.enemies[1].hp
+
+        result = adapter.execute_action("play_card", {"hand_index": 0, "target_index": 1})
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(adapter.combat.enemies[0].hp, first_hp)
+        self.assertLess(adapter.combat.enemies[1].hp, second_hp)
 
 
 class StartingResourceTests(unittest.TestCase):
@@ -176,6 +306,7 @@ class BaiyeCombatTests(unittest.TestCase):
         self.assertEqual(len(self.combat.baiye_hand), 3)
         self.assertTrue(all(0 <= card.upgrade_level <= 2 for card in self.combat.baiye_hand))
         self.assertIn("Lv.", self.enemy.current_move.intent)
+        self.assertTrue(any("基础伤害" in card.description or "护甲" in card.description for card in self.combat.baiye_hand))
 
 
 class SynergyTests(unittest.TestCase):

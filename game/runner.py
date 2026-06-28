@@ -4,7 +4,7 @@ import random
 
 from game.combat import Combat
 from game.catalog import browse_card_catalog, browse_relic_catalog
-from game.data import SKILLS, boss_enemy, create_player, elite_enemy, normal_enemy, random_relic, random_relics, reward_skills, shop_skill_offers, starting_player
+from game.data import SKILLS, act_floor_count, act_start_floor, boss_enemy, create_player, enemy_group, random_relic, random_relics, reward_skills, shop_skill_offers, starting_player
 from game.models import Player, Relic, Skill
 from game.util import clamp, clear_screen, input_choice
 
@@ -21,10 +21,11 @@ class Game:
             return
         self._choose_role()
         while self.act <= 4 and self.player.alive:
-            for floor_in_act in range(1, 9):
-                self.floor = (self.act - 1) * 8 + floor_in_act
+            final_floor = act_floor_count(self.act)
+            for floor_in_act in range(1, final_floor + 1):
+                self.floor = act_start_floor(self.act) + floor_in_act - 1
                 print(f"\n{'=' * 64}\n第 {self.act} 章 / 第 {floor_in_act} 层（总第 {self.floor} 层）")
-                node = "boss" if floor_in_act == 8 else self._choose_node(floor_in_act)
+                node = "boss" if floor_in_act == final_floor else self._choose_node(floor_in_act)
                 if not self._resolve_node(node):
                     return
                 self._after_floor_clear()
@@ -67,7 +68,7 @@ class Game:
     def _choose_node(self, floor_in_act: int) -> str:
         if floor_in_act == 1:
             return "combat"
-        if floor_in_act == 7:
+        if floor_in_act == act_floor_count(self.act) - 1:
             choices = ["rest", "shop", "training"]
         else:
             pool = ["combat", "combat", "combat", "event", "event", "treasure", "shop", "rest",
@@ -92,11 +93,14 @@ class Game:
         choice = input_choice("> ", {str(i) for i in range(1, len(choices) + 1)})
         return choices[int(choice) - 1]
 
+    def _floor_in_act(self) -> int:
+        return self.floor - act_start_floor(self.act) + 1
+
     def _resolve_node(self, node: str) -> bool:
         if node == "combat":
-            return self._fight(normal_enemy(self.act))
+            return self._fight(enemy_group("normal", self.act, self._floor_in_act()))
         if node == "elite":
-            won = self._fight(elite_enemy(self.act))
+            won = self._fight(enemy_group("elite", self.act, self._floor_in_act()))
             if won:
                 self._grant_relic()
             return won

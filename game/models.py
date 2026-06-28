@@ -88,6 +88,7 @@ class Enemy(Fighter):
     current_move: EnemyMove | None = None
     boss_id: str = ""
     enraged: bool = False
+    mechanics: dict[str, int] = field(default_factory=dict)
 
     def select_next_move(self) -> EnemyMove:
         if not self.moves:

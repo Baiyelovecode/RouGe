@@ -6,6 +6,19 @@ import random
 from game.models import Effect, Enemy, EnemyMove, Player, Relic, Skill
 
 
+ACT_FLOOR_COUNTS = {
+    4: 12,
+}
+
+
+def act_floor_count(act: int) -> int:
+    return ACT_FLOOR_COUNTS.get(act, 8)
+
+
+def act_start_floor(act: int) -> int:
+    return 1 + sum(act_floor_count(previous) for previous in range(1, act))
+
+
 def skill(
     id_: str,
     name: str,
@@ -33,6 +46,8 @@ SKILLS: dict[str, Skill] = {
     "iron_wall": skill("iron_wall", "铁壁", 2, "defense", "common", "获得 14 点护甲。", [Effect("block", 14, "self")]),
     "sidestep": skill("sidestep", "闪身", 0, "defense", "common", "获得 3 点护甲。", [Effect("block", 3, "self")]),
     "guarded_thrust": skill("guarded_thrust", "盾刺", 1, "attack", "common", "造成 5 点伤害，获得 5 点护甲。", [Effect("damage", 5), Effect("block", 5, "self")]),
+    "sweeping_strike": skill("sweeping_strike", "横扫", 1, "attack", "common", "对所有敌人造成 5 点伤害。", [Effect("damage_all", 5)]),
+    "blade_storm": skill("blade_storm", "刃风", 2, "attack", "uncommon", "对所有敌人造成 9 点伤害。", [Effect("damage_all", 9)]),
     "agility": skill("agility", "灵巧", 1, "power", "uncommon", "本场战斗敏捷 +3。", [Effect("dexterity", 3, "self")]),
     "burn": skill("burn", "燃烧术", 2, "skill", "uncommon", "施加 16 层灼烧。", [Effect("burn", 16)]),
     "ember_cut": skill("ember_cut", "余烬斩", 1, "attack", "common", "造成 8 点伤害，施加 8 层灼烧。", [Effect("damage", 8), Effect("burn", 8)]),
@@ -41,7 +56,9 @@ SKILLS: dict[str, Skill] = {
     "scorching_chain": skill("scorching_chain", "灼链", 1, "skill", "uncommon", "施加 11 层灼烧和 2 层虚弱。", [Effect("burn", 11), Effect("weak", 2)]),
     "ash_armor": skill("ash_armor", "灰烬护甲", 2, "defense", "uncommon", "获得 18 点护甲，施加 12 层灼烧。", [Effect("block", 18, "self"), Effect("burn", 12)]),
     "wildfire": skill("wildfire", "燎原", 2, "skill", "rare", "施加 20 层灼烧和 2 层易伤。", [Effect("burn", 20), Effect("vulnerable", 2)]),
+    "firestorm": skill("firestorm", "火雨", 2, "skill", "uncommon", "对所有敌人施加 12 层灼烧。", [Effect("burn_all", 12)]),
     "poison_cloud": skill("poison_cloud", "毒雾", 2, "skill", "uncommon", "施加 12 层中毒。", [Effect("poison", 12)]),
+    "plague_mist": skill("plague_mist", "疫雾", 2, "skill", "uncommon", "对所有敌人施加 8 层中毒。", [Effect("poison_all", 8)]),
     "toxic_guard": skill("toxic_guard", "毒障", 1, "defense", "common", "获得 10 点护甲，施加 5 层中毒。", [Effect("block", 10, "self"), Effect("poison", 5)]),
     "venom_math": skill("venom_math", "毒算", 0, "skill", "uncommon", "施加 3 层中毒。若敌人已有中毒，额外施加 3 层。", [Effect("poison", 3), Effect("poison_if_poisoned", 3)]),
     "septic_stab": skill("septic_stab", "腐蚀刺", 1, "attack", "common", "造成 7 点伤害，施加 5 层中毒和 2 层易伤。", [Effect("damage", 7), Effect("poison", 5), Effect("vulnerable", 2)]),
@@ -58,6 +75,12 @@ SKILLS: dict[str, Skill] = {
     "plague_cut": skill("plague_cut", "疫刃收割", 2, "attack", "rare", "造成 12 点伤害，再触发毒爆。", [Effect("damage", 12), Effect("poison_burst", 0)]),
     "balanced_form": skill("balanced_form", "均衡姿态", 2, "power", "rare", "本场战斗力量 +3，敏捷 +3，获得 14 点护甲。", [Effect("strength", 3, "self"), Effect("dexterity", 3, "self"), Effect("block", 14, "self")]),
     "execution_mark": skill("execution_mark", "处决标记", 1, "skill", "uncommon", "施加 3 层易伤和 3 层虚弱。", [Effect("vulnerable", 3), Effect("weak", 3)]),
+    "war_banner": skill("war_banner", "破阵战旗", 2, "skill", "rare", "对所有敌人施加 2 层虚弱和 2 层易伤。", [Effect("weak_all", 2), Effect("vulnerable_all", 2)]),
+    "linebreaker": skill("linebreaker", "破线斩", 1, "attack", "common", "对所有敌人造成 4 + 存活敌人数 x2 点伤害。", [Effect("damage_all_per_enemy", 4, times=2)]),
+    "shield_wall": skill("shield_wall", "盾墙推进", 1, "defense", "common", "获得 6 + 存活敌人数 x3 点护甲。", [Effect("block_per_enemy", 6, "self", times=3)]),
+    "toxic_bloom": skill("toxic_bloom", "毒花绽放", 2, "skill", "rare", "对所有敌人施加 7 层中毒，再对所有敌人触发 1.2 倍毒爆。", [Effect("poison_all", 7), Effect("poison_burst_all", -30)]),
+    "ash_surge": skill("ash_surge", "灰烬浪潮", 2, "skill", "uncommon", "对所有敌人施加 8 层灼烧，并追加其当前灼烧 40% 的伤害。", [Effect("burn_all", 8), Effect("damage_from_burn_all", 40)]),
+    "blade_maelstrom": skill("blade_maelstrom", "乱刃风暴", 2, "attack", "rare", "对所有敌人造成 7 点伤害 2 次。", [Effect("damage_all", 7, times=2)]),
     "fortress_bash": skill("fortress_bash", "城塞反击", 2, "attack", "uncommon", "获得 12 点护甲，并造成当前护甲 50% 的伤害。", [Effect("block", 12, "self"), Effect("damage_from_block", 50)]),
     "iron_breath": skill("iron_breath", "铁壁吐息", 2, "defense", "uncommon", "一次性获得 8 + 力量 x2 的护甲。", [Effect("block_with_strength", 8, "self", times=2)]),
     "toxic_shell": skill("toxic_shell", "毒甲共生", 2, "defense", "rare", "获得 12 点护甲，再获得敌人中毒层数等量的护甲。", [Effect("block", 12, "self"), Effect("block_from_enemy_poison", 100, "self")]),
@@ -105,6 +128,8 @@ UPGRADES: dict[str, Skill] = {
     "iron_wall": skill("iron_wall", "铁壁+", 2, "defense", "common", "获得 18 点护甲。", [Effect("block", 18, "self")], True),
     "sidestep": skill("sidestep", "闪身+", 0, "defense", "common", "获得 5 点护甲。", [Effect("block", 5, "self")], True),
     "guarded_thrust": skill("guarded_thrust", "盾刺+", 1, "attack", "common", "造成 8 点伤害，获得 8 点护甲。", [Effect("damage", 8), Effect("block", 8, "self")], True),
+    "sweeping_strike": skill("sweeping_strike", "横扫+", 1, "attack", "common", "对所有敌人造成 8 点伤害。", [Effect("damage_all", 8)], True),
+    "blade_storm": skill("blade_storm", "刃风+", 2, "attack", "uncommon", "对所有敌人造成 13 点伤害。", [Effect("damage_all", 13)], True),
     "agility": skill("agility", "灵巧+", 1, "power", "uncommon", "本场战斗敏捷 +5。", [Effect("dexterity", 5, "self")], True),
     "burn": skill("burn", "燃烧术+", 2, "skill", "uncommon", "施加 24 层灼烧。", [Effect("burn", 24)], True),
     "ember_cut": skill("ember_cut", "余烬斩+", 1, "attack", "common", "造成 12 点伤害，施加 12 层灼烧。", [Effect("damage", 12), Effect("burn", 12)], True),
@@ -113,7 +138,9 @@ UPGRADES: dict[str, Skill] = {
     "scorching_chain": skill("scorching_chain", "灼链+", 1, "skill", "uncommon", "施加 16 层灼烧和 3 层虚弱。", [Effect("burn", 16), Effect("weak", 3)], True),
     "ash_armor": skill("ash_armor", "灰烬护甲+", 2, "defense", "uncommon", "获得 26 点护甲，施加 18 层灼烧。", [Effect("block", 26, "self"), Effect("burn", 18)], True),
     "wildfire": skill("wildfire", "燎原+", 2, "skill", "rare", "施加 30 层灼烧和 3 层易伤。", [Effect("burn", 30), Effect("vulnerable", 3)], True),
+    "firestorm": skill("firestorm", "火雨+", 2, "skill", "uncommon", "对所有敌人施加 18 层灼烧。", [Effect("burn_all", 18)], True),
     "poison_cloud": skill("poison_cloud", "毒雾+", 2, "skill", "uncommon", "施加 18 层中毒。", [Effect("poison", 18)], True),
+    "plague_mist": skill("plague_mist", "疫雾+", 2, "skill", "uncommon", "对所有敌人施加 12 层中毒。", [Effect("poison_all", 12)], True),
     "toxic_guard": skill("toxic_guard", "毒障+", 1, "defense", "common", "获得 15 点护甲，施加 8 层中毒。", [Effect("block", 15, "self"), Effect("poison", 8)], True),
     "venom_math": skill("venom_math", "毒算+", 0, "skill", "uncommon", "施加 5 层中毒。若敌人已有中毒，额外施加 5 层。", [Effect("poison", 5), Effect("poison_if_poisoned", 5)], True),
     "septic_stab": skill("septic_stab", "腐蚀刺+", 1, "attack", "common", "造成 11 点伤害，施加 8 层中毒和 3 层易伤。", [Effect("damage", 11), Effect("poison", 8), Effect("vulnerable", 3)], True),
@@ -130,6 +157,12 @@ UPGRADES: dict[str, Skill] = {
     "plague_cut": skill("plague_cut", "疫刃收割+", 2, "attack", "rare", "造成 12 点伤害，再触发强化毒爆。", [Effect("damage", 12), Effect("poison_burst", 25)], True),
     "balanced_form": skill("balanced_form", "均衡姿态+", 2, "power", "rare", "本场战斗力量 +5，敏捷 +5，获得 20 点护甲。", [Effect("strength", 5, "self"), Effect("dexterity", 5, "self"), Effect("block", 20, "self")], True),
     "execution_mark": skill("execution_mark", "处决标记+", 1, "skill", "uncommon", "施加 4 层易伤、4 层虚弱和 2 层脆弱。", [Effect("vulnerable", 4), Effect("weak", 4), Effect("fragile", 2)], True),
+    "war_banner": skill("war_banner", "破阵战旗+", 2, "skill", "rare", "对所有敌人施加 3 层虚弱和 3 层易伤。", [Effect("weak_all", 3), Effect("vulnerable_all", 3)], True),
+    "linebreaker": skill("linebreaker", "破线斩+", 1, "attack", "common", "对所有敌人造成 6 + 存活敌人数 x3 点伤害。", [Effect("damage_all_per_enemy", 6, times=3)], True),
+    "shield_wall": skill("shield_wall", "盾墙推进+", 1, "defense", "common", "获得 9 + 存活敌人数 x4 点护甲。", [Effect("block_per_enemy", 9, "self", times=4)], True),
+    "toxic_bloom": skill("toxic_bloom", "毒花绽放+", 2, "skill", "rare", "对所有敌人施加 10 层中毒，再对所有敌人触发 1.5 倍毒爆。", [Effect("poison_all", 10), Effect("poison_burst_all", 0)], True),
+    "ash_surge": skill("ash_surge", "灰烬浪潮+", 2, "skill", "uncommon", "对所有敌人施加 12 层灼烧，并追加其当前灼烧 60% 的伤害。", [Effect("burn_all", 12), Effect("damage_from_burn_all", 60)], True),
+    "blade_maelstrom": skill("blade_maelstrom", "乱刃风暴+", 2, "attack", "rare", "对所有敌人造成 10 点伤害 2 次。", [Effect("damage_all", 10, times=2)], True),
     "fortress_bash": skill("fortress_bash", "城塞反击+", 2, "attack", "uncommon", "获得 16 点护甲，并造成当前护甲 65% 的伤害。", [Effect("block", 16, "self"), Effect("damage_from_block", 65)], True),
     "iron_breath": skill("iron_breath", "铁壁吐息+", 2, "defense", "uncommon", "一次性获得 12 + 力量 x3 的护甲。", [Effect("block_with_strength", 12, "self", times=3)], True),
     "toxic_shell": skill("toxic_shell", "毒甲共生+", 2, "defense", "rare", "获得 16 点护甲，再获得敌人中毒层数 1.5 倍的护甲。", [Effect("block", 16, "self"), Effect("block_from_enemy_poison", 150, "self")], True),
@@ -200,6 +233,11 @@ RELICS: list[Relic] = [
     Relic("folded_hourglass", "折叠沙漏", "第一回合额外抽 2 张牌。", "first_turn_draw", 2),
     Relic("waste_heat", "废热回收器", "每消耗 1 张牌，获得 3 点护甲。", "exhaust_block", 3),
     Relic("renewal_seed", "再生种子", "战斗开始时获得 6 层再生。", "battle_start_regeneration", 6),
+    Relic("cleave_charm", "裂阵护符", "全体伤害牌的基础伤害 +2。只影响写明“所有敌人/全体伤害”的卡。", "group_damage_bonus", 2),
+    Relic("echo_banner", "回声战旗", "每使用 1 张群体牌，获得 5 点护甲。群体牌包含全体伤害、全体中毒、全体灼烧和全体负面。", "group_card_block", 5),
+    Relic("splinter_blade", "裂刃碎片", "用攻击牌击杀敌人时，对其余所有敌人造成 8 点溅射伤害。", "overkill_splash", 8),
+    Relic("ash_urn", "灰烬坛", "战斗开始时对所有敌人施加 8 层灼烧。", "battle_start_burn", 8),
+    Relic("plague_bell", "疫病铃", "战斗开始时对所有敌人施加 7 层中毒。", "battle_start_poison", 7),
 ]
 
 
@@ -250,18 +288,26 @@ def second_upgrade(base: Skill) -> Skill:
 def _upgrade_effect(effect: Effect) -> Effect:
     scalable = {
         "damage",
+        "damage_all",
+        "damage_all_per_enemy",
         "lifesteal_damage",
         "block",
+        "block_per_enemy",
         "vulnerable",
+        "vulnerable_all",
         "weak",
+        "weak_all",
         "poison",
+        "poison_all",
         "burn",
+        "burn_all",
         "strength",
         "dexterity",
         "ritual_block",
         "next_attack",
         "poison_if_poisoned",
         "poison_burst",
+        "poison_burst_all",
         "weapon_damage",
         "damage_from_block",
         "block_from_strength",
@@ -284,6 +330,7 @@ def _upgrade_effect(effect: Effect) -> Effect:
         "end_burn_from_strength",
         "next_burn_multiplier",
         "damage_from_burn",
+        "damage_from_burn_all",
         "strength_if_burning",
         "burn_rekindle",
         "burn_on_card",
@@ -345,17 +392,17 @@ def move(name: str, intent: str, effects: list[Effect]) -> EnemyMove:
 
 def normal_enemy(act: int) -> Enemy:
     pool = [
-        Enemy("裂爪兽", 38 + act * 8, 38 + act * 8, moves=[
+        Enemy("裂爪兽", 38 + act * 8, 38 + act * 8, mechanics={"pack_hunter": 2 + act}, moves=[
             move("撕咬", "攻击 8", [Effect("damage", 8 + act * 2)]),
             move("利爪", "攻击 5，虚弱 1", [Effect("damage", 5 + act), Effect("weak", 1)]),
             move("低吼", "获得 6 护甲", [Effect("block", 6 + act * 2, "self")]),
         ]),
-        Enemy("铁甲虫", 45 + act * 10, 45 + act * 10, moves=[
+        Enemy("铁甲虫", 45 + act * 10, 45 + act * 10, mechanics={"shell_guard": 6 + act * 2, "thorn": 2 + act}, moves=[
             move("撞击", "攻击 7", [Effect("damage", 7 + act * 2)]),
             move("甲壳收缩", "获得 12 护甲", [Effect("block", 12 + act * 2, "self")]),
             move("重撞", "攻击 12", [Effect("damage", 12 + act * 2)]),
         ]),
-        Enemy("毒囊怪", 32 + act * 9, 32 + act * 9, moves=[
+        Enemy("毒囊怪", 32 + act * 9, 32 + act * 9, mechanics={"death_poison": 3 + act}, moves=[
             move("毒液", "中毒 4", [Effect("poison", 4 + act)]),
             move("啃咬", "攻击 6", [Effect("damage", 6 + act * 2)]),
             move("毒咬", "攻击 4，中毒 2", [Effect("damage", 4 + act), Effect("poison", 2 + act)]),
@@ -367,12 +414,12 @@ def normal_enemy(act: int) -> Enemy:
 
 def elite_enemy(act: int) -> Enemy:
     pool = [
-        Enemy("双头守卫", 85 + act * 16, 85 + act * 16, moves=[
+        Enemy("双头守卫", 85 + act * 16, 85 + act * 16, mechanics={"rally_block": 4 + act * 2}, moves=[
             move("双重劈砍", "攻击 8 x2", [Effect("damage", 8 + act * 2, times=2)]),
             move("守势", "获得 12 护甲", [Effect("block", 12 + act * 3, "self")]),
             move("粉碎", "攻击 10，易伤 2", [Effect("damage", 10 + act * 2), Effect("vulnerable", 2)]),
         ]),
-        Enemy("尖刺傀儡", 75 + act * 18, 75 + act * 18, thorn_damage=3 + act, moves=[
+        Enemy("尖刺傀儡", 75 + act * 18, 75 + act * 18, thorn_damage=3 + act, mechanics={"shell_guard": 10 + act * 2, "thorn": 3 + act}, moves=[
             move("架刺", "获得 15 护甲", [Effect("block", 15 + act * 3, "self")]),
             move("铁拳", "攻击 10", [Effect("damage", 10 + act * 3)]),
             move("连锤", "攻击 6 x2", [Effect("damage", 6 + act * 2, times=2)]),
@@ -417,6 +464,16 @@ def boss_enemy(act: int) -> Enemy:
     return Enemy("Baiye", 2499, 2499, strength=5, dexterity=5, boss_id="baiye", moves=[
         move("随机兵装", "获得 3 张随机等级卡牌，并随机打出 1-3 张", []),
     ])
+
+
+def enemy_group(enemy_type: str, act: int, floor_in_act: int) -> list[Enemy]:
+    if enemy_type == "boss":
+        return [boss_enemy(act)]
+    if enemy_type == "elite":
+        count = 1 if floor_in_act <= 1 else random.randint(1, 2)
+        return [elite_enemy(act) for _ in range(count)]
+    count = 1 if floor_in_act <= 1 else random.randint(1, 3)
+    return [normal_enemy(act) for _ in range(count)]
 
 
 def reward_skills(count: int = 3) -> list[Skill]:
