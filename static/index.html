@@ -1,0 +1,365 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>数值之塔 · 肉鸽爬塔 UI</title>
+<style>
+  :root {
+    --bg:#0b111b; --panel:#111a28; --panel2:#162235; --panel3:#1c2b42;
+    --line:#2b3b55; --line2:#3c5a7d; --text:#e8eef7; --muted:#8fa1b9;
+    --blue:#3b82f6; --cyan:#20c6d7; --green:#35c779; --orange:#f0a23a;
+    --red:#f06a6a; --gold:#e5be63; --shadow:0 18px 46px rgba(0,0,0,.26);
+    --font:-apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei","PingFang SC",Arial,sans-serif;
+    --mono:Consolas,"SFMono-Regular","JetBrains Mono",monospace;
+  }
+  *{box-sizing:border-box} html,body{margin:0;height:100%}
+  body{
+    font-family:var(--font);color:var(--text);overflow:hidden;
+    background:
+      linear-gradient(90deg,rgba(255,255,255,.035) 1px,transparent 1px),
+      linear-gradient(0deg,rgba(255,255,255,.028) 1px,transparent 1px),
+      radial-gradient(circle at 18% 0%,rgba(59,130,246,.15),transparent 30%),
+      radial-gradient(circle at 84% 18%,rgba(32,198,215,.10),transparent 30%),
+      var(--bg);
+    background-size:32px 32px,32px 32px,auto,auto,auto;
+  }
+  button,select,input{font:inherit} button{cursor:pointer}
+  .app{height:100vh;min-width:1180px;display:grid;grid-template-rows:58px 1fr auto}
+  .topbar{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:0 18px;border-bottom:1px solid var(--line);background:rgba(17,26,40,.94)}
+  .brand{display:flex;align-items:center;gap:12px}.mark{width:34px;height:34px;border:1px solid rgba(32,198,215,.56);border-radius:8px;background:linear-gradient(135deg,rgba(59,130,246,.25),rgba(32,198,215,.08));position:relative}.mark:before{content:"";position:absolute;inset:8px;border:1px solid var(--cyan);border-radius:50%}.brand-title{font-size:18px;font-weight:850}.brand-sub{margin-top:2px;color:var(--muted);font-size:12px}
+  .toolbar{display:flex;align-items:center;gap:8px}.control,.btn{min-height:34px;border:1px solid var(--line2);border-radius:8px;background:rgba(22,34,53,.95);color:var(--text);padding:0 10px}.control{min-width:112px}.seed{width:88px;min-width:88px}.btn{display:inline-flex;align-items:center;justify-content:center;font-weight:750}.btn.primary{background:rgba(59,130,246,.22);border-color:rgba(59,130,246,.75)}.btn.good{background:rgba(53,199,121,.16);border-color:rgba(53,199,121,.6)}.btn.warn{background:rgba(240,162,58,.16);border-color:rgba(240,162,58,.62)}.btn.ghost{background:rgba(12,19,31,.8)}.btn:disabled{opacity:.45;cursor:not-allowed}
+  .main{min-height:0;display:grid;grid-template-columns:300px minmax(520px,1fr) 408px;gap:12px;padding:12px}.col{min-height:0;display:grid;gap:12px}.left{grid-template-rows:auto auto 1fr}.center{grid-template-rows:minmax(260px,1fr) auto}.right{grid-template-rows:minmax(0,1fr) auto auto}
+  .panel{min-height:0;border:1px solid var(--line);border-radius:8px;background:rgba(17,26,40,.88);box-shadow:var(--shadow);overflow:hidden;display:flex;flex-direction:column}.panel-head{min-height:40px;padding:0 12px;display:flex;align-items:center;justify-content:space-between;gap:10px;border-bottom:1px solid var(--line);background:rgba(22,34,53,.72);font-size:13px;font-weight:820;flex:0 0 auto}.panel-head small{color:var(--muted);font-size:11px}.panel-body{padding:12px;overflow:auto;max-height:100%;min-height:0;flex:1 1 auto;scrollbar-gutter:stable}.panel.collapsible .panel-head{cursor:pointer}.panel-title{display:flex;align-items:center;gap:8px}.panel-toggle{min-height:26px;border:1px solid var(--line2);border-radius:8px;background:rgba(12,19,31,.72);color:#c9d9ed;padding:0 8px;font-size:11px;font-weight:820}.panel-toggle:hover{border-color:var(--cyan);color:#d6fbff}.panel.collapsed .panel-body{display:none}.panel.collapsed .panel-head{border-bottom:0}.panel.collapsed{align-self:start}.hand-panel .panel-body{max-height:224px}.bottom .panel-body{max-height:148px}.bottom .panel.collapsed .panel-body{display:none}#actionPanel{min-height:0}#actionPanel .panel-body{padding-bottom:34px}.action-grid:after{content:"";display:block;height:10px}
+  .fighter-card{display:grid;gap:10px}.name-row{display:flex;align-items:center;justify-content:space-between;gap:8px}.fighter-name{font-size:18px;font-weight:860}.badge{min-height:24px;display:inline-flex;align-items:center;padding:0 8px;border:1px solid var(--line2);border-radius:8px;background:rgba(28,43,66,.78);color:#c9d9ed;font-size:11px;font-weight:760}.badge.blue{border-color:rgba(59,130,246,.58);color:#bcd8ff}.badge.red{border-color:rgba(240,106,106,.58);color:#ffcaca}.badge.green{border-color:rgba(53,199,121,.58);color:#c9f7d9}.badge.gold{border-color:rgba(229,190,99,.62);color:#ffe5a2}
+  .bar{height:10px;border:1px solid rgba(255,255,255,.06);border-radius:8px;overflow:hidden;background:#07101d}.fill{height:100%;background:linear-gradient(90deg,var(--green),#70e59b)}.enemy-fill{background:linear-gradient(90deg,var(--red),#ff9b7c)}.energy-fill{background:linear-gradient(90deg,var(--blue),var(--cyan))}
+  .stat-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}.stat{padding:8px;border:1px solid rgba(43,59,85,.9);border-radius:8px;background:rgba(22,34,53,.62)}.stat span{display:block;color:var(--muted);font-size:11px}.stat strong{display:block;margin-top:3px;font-size:16px}.statuses{display:flex;flex-wrap:wrap;gap:6px}
+  .battlefield{height:100%;min-height:260px;position:relative;overflow:hidden;background:linear-gradient(90deg,rgba(255,255,255,.04) 1px,transparent 1px),linear-gradient(0deg,rgba(255,255,255,.035) 1px,transparent 1px),radial-gradient(circle at 50% 46%,rgba(59,130,246,.14),transparent 36%),#0a1322;background-size:38px 38px,38px 38px,auto,auto}.battlefield.shake{animation:fieldShake .34s ease}.lane{position:absolute;inset:18px;border:1px solid rgba(60,90,125,.72);border-radius:8px}.tower-line{position:absolute;left:30px;right:30px;top:52%;height:2px;background:linear-gradient(90deg,rgba(59,130,246,.25),rgba(32,198,215,.65),rgba(240,106,106,.48))}.unit{position:absolute;width:96px;height:96px;border-radius:50%;display:grid;place-items:center;font-size:14px;font-weight:860;text-align:center;line-height:1.2;transition:filter .16s,transform .16s}.unit.hit{animation:unitHit .42s ease}.unit.guard{animation:unitGuard .5s ease}.player-unit{left:12%;top:42%;border:1px solid rgba(32,198,215,.72);background:radial-gradient(circle,rgba(32,198,215,.28),rgba(59,130,246,.10) 62%,transparent 63%);color:#cbf7ff}.enemy-unit{right:12%;top:42%;border:1px solid rgba(240,106,106,.75);background:radial-gradient(circle,rgba(240,106,106,.25),rgba(240,106,106,.08) 62%,transparent 63%);color:#ffd0d0}.intent-card{position:absolute;right:22px;top:20px;width:min(320px,38%);border:1px solid rgba(240,162,58,.52);border-radius:8px;background:rgba(17,26,40,.78);padding:10px}.intent-card .label{color:var(--orange);font-size:11px;font-weight:800}.intent-card .text{margin-top:5px;color:#ffe0ac;font-size:15px;font-weight:820}.flow-strip{position:absolute;left:24px;right:24px;bottom:20px;display:grid;grid-template-columns:repeat(5,1fr);gap:8px}.flow-step{min-height:34px;display:flex;align-items:center;justify-content:center;text-align:center;border:1px solid rgba(60,90,125,.76);border-radius:8px;background:rgba(22,34,53,.72);color:#b9cbe2;font-size:11px;font-weight:760}.flow-step.active{border-color:rgba(32,198,215,.75);color:#d6fbff;background:rgba(32,198,215,.13)}.battle-fx{position:absolute;inset:0;pointer-events:none;z-index:5}.cast-card{position:absolute;left:42%;top:34%;width:150px;min-height:92px;border:1px solid rgba(32,198,215,.8);border-radius:8px;background:rgba(10,18,30,.94);box-shadow:0 14px 36px rgba(32,198,215,.18);padding:8px;animation:castCard .72s ease forwards}.cast-card .cast-name{font-size:13px;font-weight:900;color:#eafcff}.cast-card .cast-desc{margin-top:5px;color:#b7c6d9;font-size:11px;line-height:1.35}.fx-orb{position:absolute;width:18px;height:18px;border-radius:50%;filter:blur(.2px);animation:orbFly .52s ease forwards}.fx-orb.damage,.fx-orb.burn{background:var(--red);box-shadow:0 0 22px rgba(240,106,106,.75)}.fx-orb.poison{background:var(--green);box-shadow:0 0 22px rgba(53,199,121,.75)}.fx-orb.block,.fx-orb.buff{background:var(--cyan);box-shadow:0 0 22px rgba(32,198,215,.75)}.float-number{position:absolute;min-width:72px;text-align:center;font-size:18px;font-weight:950;text-shadow:0 2px 12px rgba(0,0,0,.72);animation:floatUp .9s ease forwards}.float-number.enemy{left:72%;top:34%}.float-number.player{left:16%;top:34%}.float-number.damage,.float-number.burn{color:#ffb1a6}.float-number.poison{color:#b7ffcc}.float-number.block,.float-number.buff{color:#c9fbff}
+  .hand-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(168px,1fr));gap:10px}.skill-card,.action-card{border:1px solid var(--line);border-radius:8px;background:rgba(12,19,31,.86);color:var(--text);text-align:left;transition:border-color .12s,transform .12s,background .12s,box-shadow .12s}.skill-card{min-height:156px;display:grid;grid-template-rows:auto 1fr auto;gap:8px;padding:10px;position:relative;overflow:hidden;transform-origin:center bottom}.skill-card:before{content:"";position:absolute;inset:-1px;background:linear-gradient(120deg,transparent 20%,rgba(255,255,255,.16),transparent 56%);transform:translateX(-120%);transition:transform .28s ease;pointer-events:none}.skill-card.playable{box-shadow:0 0 0 1px rgba(32,198,215,.14),0 10px 24px rgba(0,0,0,.18)}.skill-card.playable:hover{border-color:var(--cyan);transform:translateY(-5px) rotate(-.8deg);background:rgba(18,33,52,.98);box-shadow:0 16px 34px rgba(32,198,215,.15)}.skill-card.playable:hover:before{transform:translateX(120%)}.skill-card.playing{animation:handCast .38s ease forwards;border-color:rgba(229,190,99,.82)}.action-card:hover{border-color:var(--cyan);transform:translateY(-2px);background:rgba(18,33,52,.94)}.skill-card:disabled,.action-card:disabled{opacity:.48;transform:none;cursor:not-allowed}.skill-top,.action-title{display:flex;justify-content:space-between;gap:8px;align-items:start}.cost{width:28px;height:28px;display:grid;place-items:center;border-radius:50%;background:rgba(59,130,246,.18);border:1px solid rgba(59,130,246,.68);color:#d8e8ff;font-weight:900}.skill-card.playable .cost{box-shadow:0 0 16px rgba(59,130,246,.26)}.skill-name{font-size:14px;font-weight:850;line-height:1.25}.skill-desc,.action-desc{color:#b7c6d9;font-size:12px;line-height:1.45}.skill-preview{margin-top:7px;padding:6px 8px;border:1px solid rgba(229,190,99,.42);border-radius:7px;background:rgba(229,190,99,.10);color:#ffe5a2;font-size:12px;font-weight:850}.skill-meta{display:flex;align-items:center;justify-content:space-between;color:var(--muted);font-size:11px}
+  .action-grid,.log-list,.history-list,.deck-list{display:grid;gap:8px}.action-card{width:100%;min-height:54px;padding:9px}.action-title{font-weight:850}.phase-title{color:#dff7ff;font-size:13px;font-weight:850}.log-row,.history-row,.deck-row,.summary-row{border:1px solid rgba(43,59,85,.88);border-radius:8px;background:rgba(12,19,31,.62);padding:8px;color:#c8d6e8;font-size:12px;line-height:1.45}.summary-row{border-color:rgba(32,198,215,.42);background:rgba(32,198,215,.08)}.summary-row.win{border-color:rgba(53,199,121,.45);background:rgba(53,199,121,.08)}.summary-row.lose{border-color:rgba(240,106,106,.45);background:rgba(240,106,106,.08)}.history-row b,.deck-row .deck-name{color:#eaf2ff;font-weight:800}.reason{color:#ffe0a8}.deck-row{display:grid;gap:4px}.deck-row .deck-name{display:flex;align-items:center;justify-content:space-between;gap:8px}.deck-row p{margin:0;color:var(--muted)}
+  .bottom{min-height:0;display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;padding:0 12px 12px}.compact-list{display:flex;flex-wrap:wrap;gap:6px}.empty{color:#60718a;font-size:12px;padding:8px 0}.mono{font-family:var(--mono)}
+  .card-visual{height:48px;border:1px solid rgba(60,90,125,.55);border-radius:7px;background:linear-gradient(135deg,rgba(59,130,246,.16),rgba(12,19,31,.28));display:flex;align-items:center;justify-content:space-between;padding:0 10px;overflow:hidden;position:relative}.card-visual:after{content:"";position:absolute;right:-18px;top:-18px;width:58px;height:58px;border-radius:50%;background:rgba(255,255,255,.06)}.card-sigil{font-size:22px;font-weight:900;color:#dff7ff}.card-type{font-size:10px;font-weight:800;color:var(--muted);text-transform:uppercase}.visual-attack{border-color:rgba(240,106,106,.45);background:linear-gradient(135deg,rgba(240,106,106,.18),rgba(12,19,31,.28))}.visual-defense{border-color:rgba(53,199,121,.45);background:linear-gradient(135deg,rgba(53,199,121,.16),rgba(12,19,31,.28))}.visual-power{border-color:rgba(229,190,99,.45);background:linear-gradient(135deg,rgba(229,190,99,.15),rgba(12,19,31,.28))}.visual-weapon{border-color:rgba(32,198,215,.50);background:linear-gradient(135deg,rgba(32,198,215,.18),rgba(12,19,31,.28))}
+  .unit small{display:block;margin-top:4px;max-width:82px;color:rgba(232,238,247,.78);font-size:10px;font-weight:750;line-height:1.25;overflow:hidden;text-overflow:ellipsis}
+  .action-section{display:grid;gap:8px;margin-top:8px}.section-label{color:#8fa1b9;font-size:11px;font-weight:850;text-transform:uppercase;letter-spacing:.4px;margin-top:4px}.phase-summary{border:1px solid rgba(32,198,215,.42);border-radius:8px;background:rgba(32,198,215,.08);padding:10px;color:#dff7ff;font-size:12px;line-height:1.5}.action-card.compact{min-height:44px}.action-card.danger{border-color:rgba(240,106,106,.46)}.action-card.disabled-note{opacity:.64}.enemy-portrait{position:absolute;right:12%;top:24%;width:112px;height:112px;border-radius:26px;border:1px solid rgba(240,106,106,.55);background:linear-gradient(135deg,rgba(240,106,106,.18),rgba(12,19,31,.2));display:grid;place-items:center;color:#ffd0d0;font-size:36px;font-weight:900;box-shadow:0 0 28px rgba(240,106,106,.12)}
+  .relic-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(148px,1fr));gap:8px;width:100%}.relic-card{min-height:72px;border:1px solid rgba(229,190,99,.38);border-radius:8px;background:linear-gradient(135deg,rgba(229,190,99,.12),rgba(12,19,31,.75));color:var(--text);padding:8px;text-align:left;display:grid;grid-template-columns:34px 1fr;gap:8px;align-items:center}.relic-card:hover{border-color:rgba(229,190,99,.75);background:linear-gradient(135deg,rgba(229,190,99,.18),rgba(22,34,53,.85))}.relic-icon{width:34px;height:34px;border:1px solid rgba(229,190,99,.52);border-radius:8px;display:grid;place-items:center;color:#ffe5a2;font-weight:900;background:rgba(229,190,99,.10)}.relic-name{font-size:12px;font-weight:850;color:#fff1bf;line-height:1.2}.relic-desc{margin-top:3px;color:#b7c6d9;font-size:11px;line-height:1.35;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}.shop-shelf{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:8px}.shop-item{position:relative}.price-ribbon{position:absolute;right:8px;top:8px;z-index:2}.detail-pop{position:fixed;right:18px;bottom:18px;width:340px;max-width:calc(100vw - 36px);border:1px solid rgba(229,190,99,.58);border-radius:8px;background:rgba(12,19,31,.96);box-shadow:0 18px 46px rgba(0,0,0,.42);padding:12px;display:none;z-index:20}.detail-pop.show{display:block}.detail-head{display:flex;justify-content:space-between;gap:10px;align-items:center;margin-bottom:8px}.detail-title{font-size:15px;font-weight:900;color:#ffe5a2}.detail-body{color:#d7e2f2;font-size:13px;line-height:1.55}.detail-close{border:1px solid var(--line2);background:rgba(22,34,53,.8);color:var(--text);border-radius:6px;min-width:28px;height:28px}
+  .unit{width:150px;height:174px;border-radius:10px;background:none;border:0;display:block;place-items:initial;font-size:12px;text-align:left}.player-unit{left:10%;top:30%;color:#cbf7ff;background:none;border:0}.enemy-unit{right:10%;top:28%;color:#ffd0d0;background:none;border:0}.avatar-shell{position:relative;width:100%;height:100%;border:1px solid rgba(60,90,125,.76);border-radius:10px;background:linear-gradient(180deg,rgba(22,34,53,.88),rgba(8,14,24,.92));box-shadow:0 20px 38px rgba(0,0,0,.32);overflow:hidden}.avatar-shell:before{content:"";position:absolute;left:16px;right:16px;bottom:17px;height:18px;border-radius:50%;background:rgba(0,0,0,.34);filter:blur(1px)}.avatar-art{position:absolute;left:20px;right:20px;top:16px;height:108px}.avatar-head{position:absolute;left:40px;top:3px;width:30px;height:30px;border-radius:8px 8px 10px 10px;background:currentColor;box-shadow:0 0 18px color-mix(in srgb,currentColor 48%,transparent)}.avatar-body{position:absolute;left:28px;top:35px;width:56px;height:62px;border-radius:18px 18px 12px 12px;background:linear-gradient(180deg,currentColor,rgba(255,255,255,.06));clip-path:polygon(50% 0,88% 18%,100% 78%,70% 100%,30% 100%,0 78%,12% 18%)}.avatar-weapon{position:absolute;left:84px;top:20px;width:7px;height:92px;border-radius:4px;background:linear-gradient(180deg,#eef8ff,currentColor);transform:rotate(18deg);box-shadow:0 0 14px currentColor}.avatar-mark{position:absolute;right:11px;top:9px;width:34px;height:34px;border:1px solid rgba(255,255,255,.22);border-radius:8px;display:grid;place-items:center;background:rgba(255,255,255,.07);font-size:18px;font-weight:950}.avatar-name{position:absolute;left:10px;right:10px;bottom:30px;font-size:13px;font-weight:900;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-align:center}.avatar-tag{position:absolute;left:10px;right:10px;bottom:10px;color:rgba(232,238,247,.75);font-size:10px;font-weight:760;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.avatar-base{position:absolute;left:26px;right:26px;bottom:18px;height:6px;border-radius:50%;background:currentColor;opacity:.55}.avatar-shell.avatar-player{border-color:rgba(32,198,215,.72);background:linear-gradient(180deg,rgba(18,45,66,.9),rgba(8,14,24,.92))}.avatar-player .avatar-mark{color:#d6fbff}.avatar-exile{color:#74d7ff}.avatar-toxicist{color:#65e58c}.avatar-burner{color:#ff9b67}.avatar-enemy{color:#ff8b8b}.avatar-shell.avatar-enemy{border-color:rgba(240,106,106,.72);background:linear-gradient(180deg,rgba(55,24,31,.9),rgba(8,14,24,.92))}.avatar-enemy .avatar-head{border-radius:50% 50% 12px 12px}.avatar-enemy .avatar-body{clip-path:polygon(50% 0,100% 30%,82% 100%,18% 100%,0 30%)}.avatar-enemy .avatar-weapon{left:16px;transform:rotate(-18deg);background:linear-gradient(180deg,currentColor,#ffd2d2)}.avatar-toxic{color:#65e58c}.avatar-armor{color:#b9c7d8}.avatar-rage{color:#ffb15c}.avatar-boss{color:#f4d36c}.avatar-shell.avatar-boss{height:186px;border-color:rgba(229,190,99,.82);background:linear-gradient(180deg,rgba(76,55,23,.92),rgba(15,14,18,.94))}.avatar-boss .avatar-art{height:122px}.avatar-boss .avatar-head{left:35px;top:0;width:40px;height:34px}.avatar-boss .avatar-body{left:18px;top:38px;width:74px;height:78px}.avatar-boss .avatar-weapon{height:112px;left:92px;top:14px}.unit small{display:block;margin-top:0;max-width:none;color:inherit;font-size:inherit;line-height:inherit;overflow:visible}
+  @keyframes handCast{0%{transform:translateY(-5px) scale(1)}70%{transform:translateY(-24px) scale(1.04);opacity:.92}100%{transform:translateY(-34px) scale(.96);opacity:.55}}
+  @keyframes castCard{0%{opacity:0;transform:translate(-40px,46px) scale(.78) rotate(-4deg)}24%{opacity:1;transform:translate(0,0) scale(1) rotate(0)}100%{opacity:0;transform:translate(92px,-26px) scale(.86) rotate(4deg)}}
+  @keyframes orbFly{0%{left:36%;top:51%;opacity:0;transform:scale(.4)}20%{opacity:1}100%{left:73%;top:48%;opacity:0;transform:scale(1.25)}}
+  @keyframes floatUp{0%{opacity:0;transform:translateY(12px) scale(.9)}18%{opacity:1}100%{opacity:0;transform:translateY(-34px) scale(1.06)}}
+  @keyframes unitHit{0%,100%{transform:translateX(0);filter:none}24%{transform:translateX(8px);filter:brightness(1.45)}48%{transform:translateX(-6px);filter:brightness(1.25)}}
+  @keyframes unitGuard{0%{transform:scale(1);filter:none}45%{transform:scale(1.07);filter:drop-shadow(0 0 18px rgba(32,198,215,.58))}100%{transform:scale(1);filter:none}}
+  @keyframes fieldShake{0%,100%{transform:translateX(0)}25%{transform:translateX(3px)}50%{transform:translateX(-3px)}75%{transform:translateX(2px)}}
+  @media(max-width:1180px){body{overflow:auto}.app{min-width:0;height:auto;min-height:100vh;display:block}.topbar,.toolbar{flex-wrap:wrap;height:auto;padding:10px}.main,.bottom{grid-template-columns:1fr}.center{grid-template-rows:auto auto}.battlefield{min-height:360px}}
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="topbar">
+    <div class="brand"><div class="mark"></div><div><div class="brand-title">数值之塔</div><div class="brand-sub">手动卡牌战斗 · 肉鸽爬塔 UI 原型</div></div></div>
+    <div class="toolbar">
+      <select class="control" id="role"><option value="exile">流亡者</option><option value="toxicist">诡毒师</option><option value="burner">燃尽者</option></select>
+      <input class="control seed" id="seed" placeholder="seed">
+      <select class="control" id="enemyType"><option value="normal">普通战斗</option><option value="elite">精英战斗</option><option value="boss">Boss 战</option></select>
+      <button class="btn primary" id="newBtn">新局</button>
+      <button class="btn good" id="startBtn">测试开战</button>
+      <button class="btn warn" id="endBtn">结束回合</button>
+      <button class="btn ghost" id="autoBtn">自动一步</button>
+    </div>
+  </header>
+  <main class="main">
+    <section class="col left">
+      <div class="panel"><div class="panel-head">玩家 <small id="phaseText">map</small></div><div class="panel-body"><div id="playerCard" class="fighter-card"></div></div></div>
+      <div class="panel"><div class="panel-head">敌人意图 <small id="turnText">Act 1</small></div><div class="panel-body"><div id="enemyCard" class="fighter-card"></div></div></div>
+      <div class="panel"><div class="panel-head">战斗记录 <small>当前战斗</small></div><div class="panel-body"><div id="gameLog" class="log-list"></div></div></div>
+    </section>
+    <section class="col center">
+      <div class="panel battlefield">
+        <div class="lane"></div><div class="tower-line"></div><div class="unit player-unit" id="playerUnit">玩家</div><div class="unit enemy-unit" id="enemyUnit">敌人</div><div id="battleFx" class="battle-fx"></div>
+        <div class="intent-card"><div class="label">ENEMY INTENT</div><div class="text" id="intentText">选择路线开始</div></div>
+        <div class="flow-strip"><div class="flow-step active">路线</div><div class="flow-step">战斗</div><div class="flow-step">奖励</div><div class="flow-step">商店/事件</div><div class="flow-step">Boss</div></div>
+      </div>
+      <div class="panel collapsible hand-panel" id="handPanel"><div class="panel-head" onclick="togglePanel('handPanel',event)"><div class="panel-title">当前手牌 <small>点击卡牌使用</small></div><button class="panel-toggle" type="button">收起</button></div><div class="panel-body"><div id="hand" class="hand-grid"></div></div></div>
+    </section>
+    <section class="col right">
+      <div class="panel collapsible" id="actionPanel"><div class="panel-head" onclick="togglePanel('actionPanel',event)"><div class="panel-title">行动面板 <small>地图 / 奖励 / 商店</small></div><button class="panel-toggle" type="button">收起</button></div><div class="panel-body"><div id="actions" class="action-grid"></div></div></div>
+      <div class="panel collapsible" id="deckPanel"><div class="panel-head" onclick="togglePanel('deckPanel',event)"><div class="panel-title">牌组 <small id="deckCount">0 cards</small></div><button class="panel-toggle" type="button">收起</button></div><div class="panel-body"><div id="deck" class="deck-list"></div></div></div>
+      <div class="panel collapsible collapsed" id="historyPanel"><div class="panel-head" onclick="togglePanel('historyPanel',event)"><div class="panel-title">最近操作 <small>History</small></div><button class="panel-toggle" type="button">展开</button></div><div class="panel-body"><div id="history" class="history-list"></div></div></div>
+    </section>
+  </main>
+  <footer class="bottom">
+    <div class="panel collapsible" id="relicPanel"><div class="panel-head" onclick="togglePanel('relicPanel',event)"><div class="panel-title">遗物 <small>Relics</small></div><button class="panel-toggle" type="button">收起</button></div><div class="panel-body"><div id="relics" class="compact-list"></div></div></div>
+    <div class="panel collapsible collapsed" id="rolePanel"><div class="panel-head" onclick="togglePanel('rolePanel',event)"><div class="panel-title">角色机制 <small>Role Passive</small></div><button class="panel-toggle" type="button">展开</button></div><div class="panel-body" id="roleHint"></div></div>
+    <div class="panel collapsible collapsed" id="tipPanel"><div class="panel-head" onclick="togglePanel('tipPanel',event)"><div class="panel-title">提示 <small>UI Prototype</small></div><button class="panel-toggle" type="button">展开</button></div><div class="panel-body"><div class="log-row">当前版本已经接入爬塔主循环：路线节点、战斗、奖励、宝箱、休息、训练、商店和事件都可以在网页中操作。</div></div></div>
+  </footer>
+</div>
+<div id="detailPop" class="detail-pop" aria-live="polite">
+  <div class="detail-head">
+    <div class="detail-title" id="detailTitle">详情</div>
+    <button class="detail-close" onclick="hideDetail()">×</button>
+  </div>
+  <div class="detail-body" id="detailBody"></div>
+</div>
+<script>
+const roleNames={exile:'流亡者',toxicist:'诡毒师',burner:'燃尽者'};
+const statusNames={poison:'中毒',burn:'灼烧',bleed:'流血',weak:'虚弱',vulnerable:'易伤',fragile:'脆弱',regeneration:'再生',energy_debt:'能量透支',next_energy:'下回合能量',next_draw:'下回合抽牌',retain_block:'保留护甲',burn_tick_strength:'灼烧成长',end_burn_from_strength:'续火',next_burn_multiplier:'闪燃',burn_rekindle:'复燃',burn_on_card:'点火'};
+let latestState=null;
+const panelTouched=new Set();
+async function api(path,options={}){const res=await fetch(path,options);if(!res.ok)throw new Error(await res.text());return res.json()}
+async function postJson(path,body){return api(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)})}
+async function newGame(){const seed=document.getElementById('seed').value.trim();render(await postJson('/api/new',{role_id:document.getElementById('role').value,seed:seed?Number(seed):null}))}
+async function action(actionName,params={}){render(await postJson('/api/action',{action:actionName,params}))}
+async function startCombat(){await action('start_combat',{enemy_type:document.getElementById('enemyType').value})}
+async function playCard(index){
+  const card=(latestState?.combat?.hand||[]).find(c=>c.hand_index===index);
+  const el=document.querySelector(`[data-card-index="${index}"]`);
+  if(el)el.classList.add('playing');
+  showCardCast(card);
+  const data=await postJson('/api/action',{action:'play_card',params:{hand_index:index}});
+  render(data);
+  showActionFeedback(data.last_action,card);
+}
+async function endTurn(){await action('end_turn',{})}
+async function autoStep(){render(await postJson('/api/step',{agent:'heuristic'}))}
+function render(data){
+  const state=data.state||{}, player=state.player||{}, combat=state.combat||null, enemy=combat?.enemy||{};
+  latestState=state;
+  document.getElementById('phaseText').textContent=state.phase||'map';
+  document.getElementById('turnText').textContent=combat?`Turn ${combat.turn}`:`第 ${state.act||1} 章 / ${state.floor_in_act||1} 层`;
+  document.getElementById('playerUnit').innerHTML=playerAvatar(player);
+  document.getElementById('enemyUnit').innerHTML=enemyAvatar(enemy);
+  document.getElementById('intentText').textContent=enemy.intent||(state.phase==='combat'?'未知意图':'选择路线继续爬塔');
+  renderFighter('playerCard',player,{role:roleNames[player.role_id]||player.role_id,isPlayer:true});
+  renderFighter('enemyCard',enemy,{role:enemy.intent||'尚未出现',isEnemy:true});
+  renderHand(combat?.hand||[],data.legal_actions||[],player.energy||0);
+  renderActions(state,data.legal_actions||[]);
+  renderProcess(state, combat);
+  renderDeck(player.skills||[]);
+  renderRelics(player.relics||[]);
+  renderHistory(data.history||[]);
+  renderRoleHint(player);
+  syncPanelDefaults(state);
+  const inCombat=state.phase==='combat';
+  document.getElementById('startBtn').disabled=state.phase!=='map';
+  document.getElementById('endBtn').disabled=!inCombat;
+}
+function renderFighter(id,f,options={}){
+  const alive=f?.alive!==false,hp=Number(f?.hp||0),maxHp=Number(f?.max_hp||0),hpPct=maxHp?clamp(hp/maxHp*100,0,100):0,energy=Number(f?.energy||0),energyMax=Number(f?.energy_max||0),energyPct=energyMax?clamp(energy/energyMax*100,0,100):0;
+  document.getElementById(id).innerHTML=`<div class="name-row"><div class="fighter-name">${esc(f?.name||'-')}</div><span class="badge ${options.isEnemy?'red':'blue'}">${esc(options.role||'-')}</span></div>
+  <div><div class="name-row"><span class="badge ${alive?'green':'red'}">${alive?'存活':'倒下'}</span><span class="mono">${hp}/${maxHp}</span></div><div class="bar"><div class="fill ${options.isEnemy?'enemy-fill':''}" style="width:${hpPct}%"></div></div></div>
+  ${options.isPlayer?`<div><div class="name-row"><span class="badge blue">能量</span><span class="mono">${energy}/${energyMax}</span></div><div class="bar"><div class="fill energy-fill" style="width:${energyPct}%"></div></div></div>`:''}
+  <div class="stat-grid"><div class="stat"><span>护甲</span><strong>${f?.block??'-'}</strong></div><div class="stat"><span>力量</span><strong>${f?.strength??'-'}</strong></div><div class="stat"><span>敏捷</span><strong>${f?.dexterity??'-'}</strong></div><div class="stat"><span>金币</span><strong>${options.isPlayer?(f?.gold??0):'-'}</strong></div></div>
+  <div class="statuses">${renderStatusBadges(f?.statuses||{})||'<span class="empty">无状态</span>'}</div>`;
+}
+function renderHand(hand,actions,energy){
+  const legalMap=new Map();actions.filter(a=>a.action==='play_card').forEach(a=>legalMap.set(a.params.hand_index,a));
+  document.getElementById('hand').innerHTML=hand.map(card=>{
+    const a=legalMap.get(card.hand_index),legal=a?a.legal:false,cls=card.category==='attack'||card.category==='weapon'?'red':card.category==='defense'?'green':'blue';
+    return `<button class="skill-card ${legal?'playable':''}" data-card-index="${card.hand_index}" ${legal?'':'disabled'} onclick="playCard(${card.hand_index})">
+      ${cardVisual(card)}
+      <div class="skill-top"><div><div class="skill-name">${esc(card.name)}${card.upgrade_level?` +${card.upgrade_level}`:''}</div><span class="badge ${cls}">${categoryName(card.category)} · ${rarityName(card.rarity)}</span></div><div class="cost">${card.cost}</div></div>
+      <div class="skill-desc">${esc(card.description)}${card.preview?`<div class="skill-preview">当前：${esc(card.preview)}</div>`:''}</div>
+      <div class="skill-meta"><span>#${card.hand_index+1}</span><span>${legal?'可使用':energy<card.cost?'能量不足':'不可用'}</span></div>
+    </button>`
+  }).join('')||'<div class="empty">非战斗阶段。选择路线或开战后会显示手牌。</div>';
+}
+function renderActions(state,actions){
+  const target=document.getElementById('actions'),phase=state.phase,player=state.player||{};
+  if(phase==='map'){target.innerHTML=`<div class="phase-summary"><b>路线选择</b><br>第 ${state.act} 章 / 第 ${state.floor_in_act} 层。选择一个节点推进爬塔。</div><div class="action-section">${(state.node_choices||[]).map(n=>`<button class="action-card" onclick="action('choose_node',{index:${n.index}})"><div class="action-title"><span>${nodeIcon(n.id)} ${esc(n.name)}</span><span class="badge blue">${esc(n.id)}</span></div><div class="action-desc">${nodeHint(n.id)}</div></button>`).join('')}</div>`;return}
+  if(phase==='reward'){target.innerHTML=`<div class="phase-summary"><b>战斗胜利</b><br>金币 +${state.last_result?.gold||0}${state.pending_relic?`<br>待领取遗物：${esc(state.pending_relic.name)}`:''}</div><div class="section-label">选择一张卡牌</div><div class="action-section">${(state.pending_reward||[]).map(card=>cardButton(card,`action('pick_reward',{index:${card.hand_index}})`)).join('')}<button class="action-card compact" onclick="action('skip_reward',{})"><div class="action-title"><span>跳过奖励</span><span class="badge">skip</span></div><div class="action-desc">不拿牌，直接进入下一层。</div></button></div>`;return}
+  if(phase==='shop'){const shop=state.shop||{};target.innerHTML=`<div class="phase-summary"><b>商店</b><br>金币 ${player.gold??0}。点击遗物可查看详情，购买后商品会从货架移除。</div><div class="section-label">卡牌货架</div><div class="shop-shelf">${(shop.skills||[]).map((c,i)=>c?shopCard(c,c.upgrade_level>0?70:45,'skills',i,player.gold):'').join('')||'<div class="empty">已售罄</div>'}</div><div class="section-label">遗物货架</div><div class="shop-shelf">${(shop.relics||[]).map((r,i)=>r?relicShopCard(r,i,player.gold):'').join('')||'<div class="empty">已售罄</div>'}</div><div class="section-label">强化服务</div><div class="shop-shelf">${(shop.upgrades||[]).map((c,i)=>c?upgradeShopCard(c,i,player.gold):'').join('')||'<div class="empty">没有可升级卡牌</div>'}<button class="action-card compact" ${player.gold>=35?'':'disabled'} onclick="action('shop_buy',{section:'heal'})"><div class="action-title"><span>恢复 20 生命</span><span class="badge gold">35</span></div><div class="action-desc">立即回复生命值。</div></button></div><div class="section-label">移除卡牌 | ${shop.remove_price||60} 金币</div><div class="action-section">${(player.skills||[]).map((c,i)=>`<button class="action-card compact danger" ${(player.gold>=(shop.remove_price||60)&&player.skills.length>5)?'':'disabled'} onclick="action('shop_buy',{section:'remove',index:${i}})"><div class="action-title"><span>${esc(c.name)}</span><span class="badge red">${shop.remove_price||60}</span></div></button>`).join('')}</div><button class="action-card" onclick="action('shop_leave',{})"><div class="action-title"><span>离开商店</span><span class="badge blue">next</span></div><div class="action-desc">结束本层，前往下一层。</div></button>`;return}
+  if(phase==='choice'){const choice=state.choice||{};target.innerHTML=`<div class="phase-summary"><b>${esc(choice.title||'选择')}</b><br>${choice.title==='训练场'?'训练升级会把展示的 3 张候选牌全部升级。':'选择一个结果推进本层。'}</div><div class="action-section">${(choice.options||[]).map(o=>`<button class="action-card" onclick="action('choice_select',{index:${o.index}})"><div class="action-title"><span>${esc(o.label)}</span><span class="badge blue">选项 ${o.index+1}</span></div><div class="action-desc">${choiceDesc(o)}</div></button>`).join('')}</div>`;return}
+  if(phase==='victory'||phase==='game_over'){target.innerHTML=`<div class="log-row">${phase==='victory'?'通关成功。':'游戏结束。'}点击“新局”重新开始。</div>`;return}
+  const playable=actions.filter(a=>a.action==='play_card'&&a.legal).length,all=actions.filter(a=>a.action==='play_card').length,hasEnd=actions.some(a=>a.action==='end_turn');
+  target.innerHTML=`<span class="badge blue">手牌 ${all}</span><span class="badge green">可用 ${playable}</span><span class="badge ${hasEnd?'gold':''}">${hasEnd?'可结束回合':'等待开战'}</span>`;
+}
+function cardButton(card,onClick){return `<button class="action-card" onclick="${onClick}">${cardVisual(card)}<div class="action-title"><span>${esc(card.name)}${card.upgrade_level?` +${card.upgrade_level}`:''}</span><span class="badge blue">${card.cost}</span></div><div class="action-desc">${esc(card.description)}</div></button>`}
+function shopCard(card,price,section,index,gold){return `<button class="action-card shop-item" ${gold>=price?'':'disabled'} onclick="action('shop_buy',{section:'${section}',index:${index}})"><span class="badge gold price-ribbon">${price}</span>${cardVisual(card)}<div class="action-title"><span>${esc(card.name)}${card.upgrade_level?` +${card.upgrade_level}`:''}</span><span class="badge blue">${card.cost}</span></div><div class="action-desc">${esc(card.description)}</div></button>`}
+function relicShopCard(relic,index,gold){
+  return `<div class="shop-item">
+    <span class="badge gold price-ribbon">90</span>
+    ${relicCard(relic, `showRelicDetail(${jsStr(relic.name)},${jsStr(relic.description)},${jsStr(relic.hook||'')})`)}
+    <button class="action-card compact" ${gold>=90?'':'disabled'} onclick="action('shop_buy',{section:'relics',index:${index}})">
+      <div class="action-title"><span>购买 ${esc(relic.name)}</span><span class="badge gold">90</span></div>
+    </button>
+  </div>`;
+}
+function upgradeShopCard(card,index,gold){return `<button class="action-card" ${gold>=60?'':'disabled'} onclick="action('shop_buy',{section:'upgrades',index:${index}})"><div class="action-title"><span>升级：${esc(card.name)}</span><span class="badge gold">60</span></div><div class="action-desc">Lv.${card.upgrade_level} -> Lv.${card.upgrade_level+1}</div></button>`}
+function relicCard(relic,onClick){
+  return `<button class="relic-card" title="${esc(relic.description)}" onclick="${onClick}">
+    <div class="relic-icon">${relicIcon(relic)}</div>
+    <div><div class="relic-name">${esc(relic.name)}</div><div class="relic-desc">${esc(relic.description)}</div></div>
+  </button>`;
+}
+function relicIcon(relic){
+  const text=`${relic.name} ${relic.description} ${relic.hook||''}`;
+  if(text.includes('毒'))return '毒';
+  if(text.includes('燃')||text.includes('灼')||text.includes('烬'))return '火';
+  if(text.includes('金币')||text.includes('钱'))return '金';
+  if(text.includes('武器')||text.includes('兵'))return '武';
+  if(text.includes('护甲')||text.includes('盾'))return '盾';
+  if(text.includes('流亡')||text.includes('适应'))return '适';
+  if(text.includes('抽牌')||text.includes('手牌'))return '牌';
+  return '遗';
+}
+function showRelicDetail(name,desc,hook){
+  document.getElementById('detailTitle').textContent=name;
+  document.getElementById('detailBody').innerHTML=`<div>${esc(desc)}</div>${hook?`<div class="reason" style="margin-top:8px">机制：${esc(hook)}</div>`:''}`;
+  document.getElementById('detailPop').classList.add('show');
+}
+function hideDetail(){document.getElementById('detailPop').classList.remove('show')}
+function cardVisual(card){
+  const sigil=cardSigil(card), cls=visualClass(card.category);
+  return `<div class="card-visual ${cls}"><span class="card-sigil">${sigil}</span><span class="card-type">${categoryName(card.category)} / ${rarityName(card.rarity)}</span></div>`;
+}
+function cardSigil(card){
+  const text=`${card.name} ${card.description}`;
+  if(text.includes('中毒')||text.includes('毒'))return '毒';
+  if(text.includes('灼烧')||text.includes('燃')||text.includes('火'))return '火';
+  if(text.includes('吸血')||text.includes('回复'))return '血';
+  if(card.category==='weapon')return '武';
+  if(card.category==='defense')return '盾';
+  if(card.category==='power')return '能';
+  if(card.category==='skill')return '术';
+  return '斩';
+}
+function visualClass(category){return category==='weapon'?'visual-weapon':category==='defense'?'visual-defense':category==='power'?'visual-power':'visual-attack'}
+function categoryName(category){return {attack:'攻击',defense:'防御',skill:'技能',power:'能力',weapon:'武器'}[category]||category}
+function rarityName(rarity){return {basic:'基础',common:'普通',uncommon:'罕见',rare:'稀有'}[rarity]||rarity}
+function playerAvatar(player){
+  const role=player?.role_id||'exile';
+  const mark={exile:'刃',toxicist:'毒',burner:'火'}[role]||'人';
+  return `<div class="avatar-shell avatar-player avatar-${role}">
+    <div class="avatar-art"><div class="avatar-head"></div><div class="avatar-body"></div><div class="avatar-weapon"></div></div>
+    <div class="avatar-mark">${mark}</div><div class="avatar-base"></div>
+    <div class="avatar-name">${esc(player?.name||'玩家')}</div><div class="avatar-tag">${esc(roleNames[role]||'冒险者')}</div>
+  </div>`;
+}
+function enemyAvatar(enemy){
+  if(!enemy||!enemy.name)return `<div class="avatar-shell avatar-enemy"><div class="avatar-art"><div class="avatar-head"></div><div class="avatar-body"></div></div><div class="avatar-mark">?</div><div class="avatar-base"></div><div class="avatar-name">敌人</div><div class="avatar-tag">未出现</div></div>`;
+  const name=enemy.name, intent=enemy.intent||'', text=`${name} ${intent}`;
+  let sigil='敌', tag='目标', cls='avatar-enemy';
+  if(name==='Baiye'){sigil='白';tag='终局 Boss';cls+=' avatar-boss'}
+  else if(text.includes('狂暴')){sigil='狂';tag='狂暴';cls+=' avatar-rage'}
+  else if(text.includes('毒')){sigil='毒';tag='毒系';cls+=' avatar-toxic'}
+  else if(text.includes('护甲')||text.includes('甲')){sigil='甲';tag='重甲';cls+=' avatar-armor'}
+  else if(text.includes('攻击')||text.includes('爪')||text.includes('击')){sigil='爪';tag='攻击';cls+=' avatar-rage'}
+  return `<div class="avatar-shell ${cls}">
+    <div class="avatar-art"><div class="avatar-head"></div><div class="avatar-body"></div><div class="avatar-weapon"></div></div>
+    <div class="avatar-mark">${sigil}</div><div class="avatar-base"></div>
+    <div class="avatar-name">${esc(name)}</div><div class="avatar-tag">${tag}</div>
+  </div>`;
+}
+function nodeIcon(id){return {combat:'战',elite:'精',boss:'王',event:'?',shop:'商',rest:'息',treasure:'箱',training:'训',armory:'武'}[id]||'-'}
+function renderProcess(state, combat){
+  const target=document.getElementById('gameLog');
+  const settlement=state.settlement;
+  if(settlement){
+    const cls=settlement.result==='won'?'win':settlement.result==='lost'?'lose':'';
+    const records=(settlement.records||settlement.logs||[]).slice(-10).reverse();
+    target.innerHTML=`<div class="summary-row ${cls}"><b>${esc(settlement.title||'结算')}</b><br>${settlement.result==='won'?'胜利':settlement.result==='lost'?'失败':'完成'}${settlement.enemy?` · ${esc(settlement.enemy)}`:''}${settlement.gold?` · 金币 +${settlement.gold}`:''}${settlement.relic?`<br>遗物：${esc(settlement.relic.name)} - ${esc(settlement.relic.description)}`:''}${settlement.picked!==undefined?`<br>奖励选择：${settlement.picked?esc(settlement.picked.name):'跳过'}`:''}${(settlement.lines||[]).map(line=>`<br>${esc(line)}`).join('')}</div>${records.map(x=>`<div class="log-row">${esc(x)}</div>`).join('')}`;
+    return;
+  }
+  if(combat){
+    const records=[...(combat.turn_records||[]),...(combat.log||[])].slice(-14).reverse();
+    target.innerHTML=records.map(x=>`<div class="log-row">${esc(x)}</div>`).join('')||'<div class="empty">本回合还没有行动。</div>';
+    return;
+  }
+  target.innerHTML='<div class="empty">选择路线开始下一层。</div>';
+}
+function renderDeck(cards){document.getElementById('deckCount').textContent=`${cards.length} cards`;document.getElementById('deck').innerHTML=cards.map(c=>`<div class="deck-row"><div class="deck-name"><span>${esc(c.name)}${c.upgrade_level?` +${c.upgrade_level}`:''}</span><span class="badge">${c.cost}</span></div><p>${esc(c.description)}</p></div>`).join('')||'<div class="empty">暂无卡牌。</div>'}
+function renderRelics(relics){document.getElementById('relics').innerHTML=relics.length?`<div class="relic-grid">${relics.map(r=>relicCard(r,`showRelicDetail(${jsStr(r.name)},${jsStr(r.description)},${jsStr(r.hook||'')})`)).join('')}</div>`:'<div class="empty">暂无遗物。</div>'}
+function renderHistory(history){document.getElementById('history').innerHTML=history.slice(-8).reverse().map(h=>`<div class="history-row"><b>${esc(h.agent||'player')} · ${esc(h.action||'-')}</b><div class="mono">${esc(JSON.stringify(h.params||{}))}</div><div class="reason">${esc(h.reason||'')}</div></div>`).join('')||'<div class="empty">暂无操作。</div>'}
+function renderRoleHint(player){const hints={exile:'流亡者：每场战斗开始获得适应加成。力量和敏捷一起成长，适合稳定数值压制。',toxicist:'诡毒师：出牌后按伤害或护甲给敌人追加中毒。毒爆和毒层消费是核心节奏。',burner:'燃尽者：免疫自身灼烧。每 3 层本回合施加的灼烧转化为 1 点力量，越拖越强。'};document.getElementById('roleHint').innerHTML=`<div class="log-row">${esc(hints[player.role_id]||'选择角色开始。')}</div>`}
+function renderStatusBadges(statuses){return Object.entries(statuses).filter(([,v])=>Number(v)>0).map(([k,v])=>{const kind=k==='poison'?'green':k==='burn'||k==='bleed'?'red':k.includes('energy')?'blue':'gold';return `<span class="badge ${kind}">${esc(statusNames[k]||k)} ${v}</span>`}).join('')}
+function togglePanel(id,event){
+  if(event?.target?.closest('button'))event.stopPropagation();
+  const panel=document.getElementById(id);
+  if(!panel)return;
+  panelTouched.add(id);
+  setPanelCollapsed(id,!panel.classList.contains('collapsed'));
+}
+function setPanelCollapsed(id,collapsed){
+  const panel=document.getElementById(id);
+  if(!panel)return;
+  panel.classList.toggle('collapsed',collapsed);
+  const btn=panel.querySelector('.panel-toggle');
+  if(btn)btn.textContent=collapsed?'展开':'收起';
+}
+function syncPanelDefaults(state){
+  if(!panelTouched.has('handPanel'))setPanelCollapsed('handPanel',state.phase!=='combat');
+  if(!panelTouched.has('actionPanel'))setPanelCollapsed('actionPanel',false);
+  if(!panelTouched.has('relicPanel'))setPanelCollapsed('relicPanel',(state.player?.relics||[]).length===0);
+}
+function nodeHint(id){return {combat:'普通战斗，胜利后获得金币和卡牌奖励。',elite:'更强敌人，胜利后额外获得遗物。',boss:'章节 Boss，胜利后进入下一章。',event:'随机事件，通常带有资源交换。',shop:'购买卡牌、遗物、升级、移除卡牌。',rest:'恢复生命或升级卡牌。',treasure:'直接获得一个遗物。',training:'提升生命上限或升级卡牌。',armory:'选择武器牌，或放弃换金币。'}[id]||'未知节点。'}
+function choiceDesc(o){if(o.card)return `[${o.card.cost}] ${o.card.description}`;if(o.cards&&o.cards.length)return o.cards.map(c=>c.name).join(' / ');return o.kind||''}
+function showCardCast(card){
+  if(!card)return;
+  const fx=document.getElementById('battleFx');
+  if(!fx)return;
+  const node=document.createElement('div');
+  node.className='cast-card';
+  node.innerHTML=`${cardVisual(card)}<div class="cast-name">${esc(card.name)}${card.upgrade_level?` +${card.upgrade_level}`:''}</div><div class="cast-desc">${esc(card.description)}${card.preview?`<div class="skill-preview">当前：${esc(card.preview)}</div>`:''}</div>`;
+  fx.appendChild(node);
+  setTimeout(()=>node.remove(),760);
+}
+function showActionFeedback(actionResult,card){
+  const result=actionResult?.result||{};
+  const played=result.played||card;
+  const logs=[...(result.logs||[]),...((result.combat_result||{}).records||[])];
+  const text=`${played?.name||''} ${played?.description||''} ${logs.join(' ')}`;
+  const kinds=effectKinds(text,played);
+  kinds.forEach((kind,i)=>setTimeout(()=>playBattleEffect(kind,feedbackLabel(kind,text)),i*110));
+}
+function effectKinds(text,card){
+  const kinds=[];
+  const source=String(text||'');
+  if(source.includes('护甲')||card?.category==='defense')kinds.push('block');
+  if(source.includes('中毒')||source.includes('毒'))kinds.push('poison');
+  if(source.includes('灼烧')||source.includes('燃')||source.includes('火'))kinds.push('burn');
+  if(source.includes('力量')||source.includes('敏捷')||source.includes('强化')||card?.category==='power')kinds.push('buff');
+  if(source.includes('伤害')||source.includes('攻击')||card?.category==='attack'||card?.category==='weapon')kinds.unshift('damage');
+  return [...new Set(kinds)].slice(0,3);
+}
+function feedbackLabel(kind,text){
+  const n=String(text||'').match(/(?:造成|获得|施加|附加|回复)\s*(\d+)/);
+  const value=n?` ${n[1]}`:'';
+  return {damage:`伤害${value}`,block:`护甲${value}`,poison:`中毒${value}`,burn:`灼烧${value}`,buff:'强化'}[kind]||'效果';
+}
+function playBattleEffect(kind,label){
+  const fx=document.getElementById('battleFx'), field=document.querySelector('.battlefield'), enemy=document.getElementById('enemyUnit'), player=document.getElementById('playerUnit');
+  if(!fx)return;
+  const target=kind==='block'||kind==='buff'?'player':'enemy';
+  const unit=target==='player'?player:enemy;
+  unit?.classList.remove('hit','guard');
+  void unit?.offsetWidth;
+  unit?.classList.add(target==='player'?'guard':'hit');
+  if(kind==='damage'||kind==='burn')pulseClass(field,'shake',360);
+  const orb=document.createElement('div');
+  orb.className=`fx-orb ${kind}`;
+  fx.appendChild(orb);
+  setTimeout(()=>orb.remove(),560);
+  const float=document.createElement('div');
+  float.className=`float-number ${target} ${kind}`;
+  float.textContent=label;
+  fx.appendChild(float);
+  setTimeout(()=>float.remove(),920);
+}
+function pulseClass(el,cls,ms){
+  if(!el)return;
+  el.classList.remove(cls);
+  void el.offsetWidth;
+  el.classList.add(cls);
+  setTimeout(()=>el.classList.remove(cls),ms);
+}
+function esc(v){const d=document.createElement('div');d.textContent=String(v??'');return d.innerHTML}
+function jsStr(v){return JSON.stringify(String(v??''))}
+function clamp(v,min,max){return Math.max(min,Math.min(max,v))}
+document.getElementById('newBtn').addEventListener('click',newGame);
+document.getElementById('startBtn').addEventListener('click',startCombat);
+document.getElementById('endBtn').addEventListener('click',endTurn);
+document.getElementById('autoBtn').addEventListener('click',autoStep);
+api('/api/state').then(render);
+</script>
+</body>
+</html>
